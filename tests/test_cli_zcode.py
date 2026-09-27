@@ -17,13 +17,17 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from typer.testing import CliRunner
 
 from powercontext.cli import zcode
-from powercontext.cli.system import SetupError
+from powercontext.cli.app import create_cli
+from powercontext.cli.system import SetupError, doctor_app
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows desktop installation path")
@@ -117,6 +121,25 @@ def test_zcode_diagnostics_distinguish_registration_hook_mcp_and_server(tmp_path
         '{"mcpServers":{"powercontext":{"url":123,"headers":[]}}}', encoding="utf-8"
     )
     assert not zcode.run_zcode_diagnostics()["mcp"].ok
+
+
+def test_zcode_doctor_uses_installed_url_with_stale_environment_override(tmp_path: Path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setattr(zcode, "zcode_config_file", lambda: home / ".zcode" / "cli" / "config.json")
+    monkeypatch.setattr(zcode, "zcode_executable", lambda: "zcode")
+    checkout = tmp_path / "checkout"
+    _checkout(checkout)
+    zcode.install_zcode_plugin(source=str(checkout), ref="unused", server_url="https://installed.example")
+    monkeypatch.setattr(zcode, "urlopen", lambda *_args, **_kwargs: nullcontext(SimpleNamespace(status=200)))
+    monkeypatch.setenv("POWERCONTEXT_ZCODE_SERVER_URL", "http://127.0.0.1:1")
+    monkeypatch.setenv("POWERCONTEXT_CLIENT_SERVER_URL", "http://127.0.0.1:2")
+
+    result = CliRunner().invoke(create_cli([doctor_app]), ["doctor", "zcode", "--json"])
+
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.output)
+    assert report["ok"] is True
+    assert "transport" not in report["checks"]
 
 
 def test_zcode_install_restores_config_and_plugin_when_config_write_fails(tmp_path: Path, monkeypatch) -> None:

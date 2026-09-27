@@ -164,6 +164,8 @@ def _selected_url(host: str, prefix: str, native_url: str | None) -> str:
         return _environment_url(prefix + "_BASE_URL") or native_url or common_url or fallback
     if host == "workbuddy":
         return _environment_url(prefix + "_SERVER_URL") or common_url or fallback
+    if host == "zcode":
+        return native_url or _environment_url(prefix + "_SERVER_URL") or _DEFAULT_URL
     return environment_url or common_url or native_url or fallback
 
 

@@ -1,6 +1,17 @@
 /*
  * Copyright (c) 2026 OceanBase.
- * Licensed under the Apache License, Version 2.0.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 import assert from 'node:assert/strict'
@@ -26,9 +37,9 @@ beforeEach(() => {
 
 before(async () => {
   server = createServer(async (request, response) => {
-    let raw = ''
-    for await (const chunk of request) raw += chunk
-    const body = JSON.parse(raw)
+    const chunks = []
+    for await (const chunk of request) chunks.push(chunk)
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
     requests.push({ path: request.url, body })
     response.setHeader('Content-Type', 'application/json')
     const replacement = override[request.url]
@@ -186,13 +197,36 @@ test('prepare and capture failures remain independent and do not expose their bo
 })
 
 test('sensitive prompts are recalled but not automatically captured', async () => {
-  const result = await invoke({ hookEventName: 'UserPromptSubmit', sessionId: 'session-6', turnId: 'turn-7',
-    cwd: pluginRoot, prompt: 'Check API_KEY=example-not-real-secret.' })
-  assert.equal(result.code, 0)
-  assert.match(JSON.parse(result.stdout).hookSpecificOutput.additionalContext, /blue deployment/)
-  assert.deepEqual(requests.map(request => request.path), [
-    '/v1/scope-bindings/resolve', '/v1/context/prepare',
-  ])
+  for (const prompt of [
+    'Check API_KEY=example-not-real-secret.',
+    '{"password":"synthetic-password-for-review"}',
+    '{"access_token":"synthetic-token-for-review"}',
+  ]) {
+    requests.length = 0
+    const result = await invoke({ hookEventName: 'UserPromptSubmit', sessionId: 'session-6', turnId: 'turn-7',
+      cwd: pluginRoot, prompt })
+    assert.equal(result.code, 0)
+    assert.match(JSON.parse(result.stdout).hookSpecificOutput.additionalContext, /blue deployment/)
+    assert.deepEqual(requests.map(request => request.path), [
+      '/v1/scope-bindings/resolve', '/v1/context/prepare',
+    ])
+  }
+})
+
+test('large multibyte prompts are captured without changing their content', async () => {
+  const prompt = `Deployment note: ${'中'.repeat(100_000)}`
+  const payload = { hookEventName: 'UserPromptSubmit', sessionId: 'session-utf8', turnId: 'turn-utf8',
+    cwd: pluginRoot, prompt }
+  const first = await invoke(payload)
+  assert.equal(first.code, 0)
+  const captured = requests.find(request => request.path === '/v1/sources/content')?.body
+  assert.equal(captured?.content, prompt)
+  const firstId = captured.source_id
+
+  requests.length = 0
+  const repeated = await invoke(payload)
+  assert.equal(repeated.code, 0)
+  assert.equal(requests.find(request => request.path === '/v1/sources/content')?.body.source_id, firstId)
 })
 
 test('slow prepare times out without losing independent Source capture', async () => {
