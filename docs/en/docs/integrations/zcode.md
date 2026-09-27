@@ -12,7 +12,8 @@ This integration supports the [open-source ZCode CLI](https://github.com/zai-org
 app version 3.14.3 has also been exercised with a live PowerContext Server and GLM-5.3-Flash:
 ordinary prompt capture, automatic Memory generation, fresh-session recall, and MCP Memory read/write worked.
 The same release also passed Handoff preparation, temporary resolution, commit, and fresh-session resolution, plus
-local Bearer authentication and recovery after a Server outage. Other official releases and remote HTTPS remain unverified.
+local Bearer authentication and recovery after a Server outage. The open-source CLI has also passed remote HTTPS
+validation through an SSH port forward. Direct HTTPS ingress and other official releases remain unverified.
 
 ## Install matching Server and plugin versions
 
@@ -43,9 +44,9 @@ the old process running with its previous plugin configuration.
 
 ## Start the Server and the host
 
-To extract Memory automatically from Sources, configure the separately running Server's Generation model and Memory
-schedule. For a first-time setup, use the configuration wizard. Preserve existing storage, listener, and authentication
-settings when updating a Server that already has data:
+To extract Memory automatically from Sources, configure the separately running Server's Generation model, Source-window
+schedule, and Memory schedule. For a first-time setup, use the configuration wizard. Preserve existing storage,
+listener, and authentication settings when updating a Server that already has data:
 
 ```bash
 powercontext config init --output powercontext.env
@@ -58,8 +59,13 @@ in `powercontext.env`. Keep that file out of Git:
 POWERCONTEXT_SERVER_INFERENCE_GENERATION_MODEL=openai-chat:glm-5.3-flash
 OPENAI_BASE_URL=https://api.z.ai/api/coding/paas/v4
 OPENAI_API_KEY=<your Coding Plan API key>
+POWERCONTEXT_SERVER_RUNTIME_SCHEDULE_SECONDS=60
 POWERCONTEXT_SERVER_RUNTIME_MEMORY_SCHEDULE_SECONDS=60
 ```
+
+Enable both schedules: the first processes captured Source windows, and the second schedules Memory generation.
+With only the second, new Sources may never enter automatic extraction. A `ready` Generation health check does not
+replace reading back the Memory entry.
 
 For a BigModel China Coding Plan, use `https://open.bigmodel.cn/api/coding/paas/v4` as `OPENAI_BASE_URL`. Coding Plan
 endpoints are for coding use and differ from general API endpoints. Check account and model availability in the
@@ -94,7 +100,9 @@ then install the plugin with that `https://host` URL. Configure the Server ident
 [Deployment authentication](../operate/deploy-server.md), and give the launching ZCode process the full
 `POWERCONTEXT_ZCODE_AUTHORIZATION` value described below. Acceptance should check that an unauthenticated request is
 rejected, a ZCode MCP tool succeeds, and an ordinary prompt becomes a Source in the same remote Scope. This integration
-has not yet been tested across machines over HTTPS.
+has been tested across machines over HTTPS through an SSH port forward. When using a private CA, provide its certificate
+to the ZCode process through `NODE_EXTRA_CA_CERTS` and to Python diagnostics through `SSL_CERT_FILE`. Keep certificate
+verification enabled. This tunnel test does not establish direct HTTPS reachability of the remote listener.
 
 Prepare an existing Scope before launching ZCode: use the Server default, a persistent ZCode workspace/session binding,
 or an explicit `POWERCONTEXT_ZCODE_SCOPE_ID`. The Hook does not create a Scope. See
@@ -196,9 +204,18 @@ ZCode. Handoff completed `handoff_current_work` → `continue_handoff` (prepared
 `continue_handoff` (latest), and revision 1 was read back from the Server. Other exercised tools include `get_scope`,
 `list_memory_entries`, `capture_content_source`, `list_artifact_candidates`, and `list_dream_runs`; the last two
 returned valid empty lists. A plugin installed in a fresh directory created by the Windows login user also passed
-official desktop MCP `list_scopes` and Hook Source capture against the isolated Server. Remote HTTPS and other official
-releases remain unverified. The open-source CLI has not yet run a combined real-model and real-Server end-to-end
-acceptance test.
+official desktop MCP `list_scopes` and Hook Source capture against the isolated Server. Other official releases remain
+unverified. Open-source ZCode CLI 0.16.9 also completed a real-model, local-Server capture →
+automatic Memory generation → fresh-session recall test. In an isolated scope, a normal prompt supplied a durable
+project rollback constraint, scheduled processing created a Memory entry citing that Source, and a fresh CLI session
+answered the build marker without receiving it in the question. `context/prepare` returned `ready` content containing
+the marker. Simple constants that could be recovered cheaply from code were not extracted in the same test, consistent
+with the Memory selection policy.
+The same CLI connected to a PowerContext Server on a separate Linux machine through Caddy HTTPS and an SSH port forward,
+using a trusted private CA and Bearer authentication. An unauthenticated API request returned 401, an authenticated
+request returned 200, MCP `list_scopes` returned the remote Scope, and an ordinary CLI prompt produced a Source that was
+read back from that Scope. Direct HTTPS ingress on the remote port was not validated: the client-side TLS handshake
+failed on that network path.
 
 ## Understand what the plugin does
 

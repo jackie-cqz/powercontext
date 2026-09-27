@@ -11,7 +11,7 @@ description: 安装 PowerContext ZCode 插件，验证自动生成 Memory、新�
 本集成支持[开源 ZCode CLI](https://github.com/zai-org/ZCode)。官方 Windows 桌面版 3.14.3 已用真实
 PowerContext Server 和 GLM-5.3-Flash 验证普通提示词采集、自动生成 Memory、新会话召回及 MCP Memory 读写。
 同一版本也已验证 Handoff 的准备、临时读取、提交和新会话读取，以及本地 Bearer 鉴权与断服恢复。
-其他官方版本及远程 HTTPS 连接尚未验证。
+开源 CLI 还通过 SSH 端口转发验证了跨机器 HTTPS 连接。远端端口的直接 HTTPS 接入及其他官方版本尚未验证。
 
 ## 安装匹配的 Server 和插件
 
@@ -40,7 +40,7 @@ powercontext setup zcode --source 'C:\path\to\powercontext'
 
 ## 启动 Server 和宿主
 
-需要自动从 Source 提取 Memory 时，先为独立运行的 Server 配置 Generation 和 Memory 定时处理。
+需要自动从 Source 提取 Memory 时，先为独立运行的 Server 配置 Generation、Source 窗口和 Memory 定时处理。
 首次配置可运行向导；已有 Server 配置时，保留原有存储、监听和鉴权设置：
 
 ```bash
@@ -54,8 +54,12 @@ powercontext config init --output powercontext.env
 POWERCONTEXT_SERVER_INFERENCE_GENERATION_MODEL=openai-chat:glm-5.3-flash
 OPENAI_BASE_URL=https://api.z.ai/api/coding/paas/v4
 OPENAI_API_KEY=<你的 Coding Plan API Key>
+POWERCONTEXT_SERVER_RUNTIME_SCHEDULE_SECONDS=60
 POWERCONTEXT_SERVER_RUNTIME_MEMORY_SCHEDULE_SECONDS=60
 ```
+
+两个调度都需要启用：前者处理已采集的 Source 窗口，后者调度 Memory 生成。只配置后者时，
+新 Source 可能一直不会进入自动提取；`/health/ready` 的 Generation ready 不能代替条目读回。
 
 BigModel 国内 Coding Plan 的 `OPENAI_BASE_URL` 应为 `https://open.bigmodel.cn/api/coding/paas/v4`。
 Coding Plan 的专用端点仅用于 Coding 场景，不能与通用 API 端点混用；具体账户和模型可用性见
@@ -87,7 +91,9 @@ Server 使用其他地址时，重新运行 `powercontext setup zcode --server-u
 再用上述 `https://host` 地址安装插件。按[部署认证](../operate/deploy-server.md)配置 Server 身份与 Token；
 启动 ZCode 的进程提供完整的 `POWERCONTEXT_ZCODE_AUTHORIZATION`，如下一节所示。
 验收时分别检查无凭据请求被拒绝、ZCode MCP 工具成功，以及普通提示词在同一远程 Scope 中形成 Source。
-本集成尚未在实际跨机器 HTTPS 环境做过这些检查。
+开源 CLI 已通过 SSH 端口转发在跨机器 HTTPS 环境完成这些检查。使用私有 CA 时，给 ZCode 进程设置
+`NODE_EXTRA_CA_CERTS`，给 Python 诊断进程设置 `SSL_CERT_FILE`，均指向该 CA 证书；保持证书验证开启。
+该隧道验收不能证明远端监听端口可被客户端直接通过 HTTPS 访问。
 
 启动 ZCode 前准备一个已有 Scope：使用 Server 默认 Scope，或为 ZCode workspace/session 建立持久 binding；
 也可用 `POWERCONTEXT_ZCODE_SCOPE_ID` 显式指定。Hook 不会自动创建 Scope。项目隔离方法见
@@ -178,8 +184,15 @@ MCP 读取和 Hook 采集重新成功。Handoff 已完成 `handoff_current_work`
 其他已实测工具包括 `get_scope`、`list_memory_entries`、`capture_content_source`、
 `list_artifact_candidates` 和 `list_dream_runs`；后两者返回合法的空列表。
 另在由 Windows 登录用户创建的全新用户目录中安装插件，官方桌面版通过 MCP `list_scopes` 读取隔离 Server，
-Hook 也把该轮普通提示词写成 Source。远程 HTTPS 连接与其他官方版本尚未实测。
-开源 CLI 尚未用真实模型与真实 Server 联合跑完整链路。
+Hook 也把该轮普通提示词写成 Source。其他官方版本尚未实测。
+开源 ZCode CLI 0.16.9 也已用真实模型和本地 Server 完成采集 → 自动生成 Memory → 全新会话召回：
+隔离 Scope 中的项目回滚约束由普通提示词采集为 Source，定时处理生成的 Memory 条目引用了该 Source；
+新会话问题未包含构建标记，`context/prepare` 返回含该标记的 `ready` 内容，CLI 回答了正确标记。
+容易从代码重新找到的常量在同次验收中未被提取，符合 Memory 的筛选规则。
+同一开源 CLI 还通过 SSH 端口转发、Caddy HTTPS、受信任的私有 CA 和 Bearer 鉴权连接了另一台 Linux
+机器上的 PowerContext Server。无凭据 API 请求返回 401，有凭据请求返回 200；MCP `list_scopes`
+读到远端 Scope，普通 CLI 提示词产生的 Source 可从该 Scope 读回。当前网络路径下，直接连接远端端口的
+TLS 握手失败，因此远端端口的直接 HTTPS 接入尚未验收。
 
 ## 理解插件行为
 
