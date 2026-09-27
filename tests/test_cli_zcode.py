@@ -18,6 +18,7 @@ import json
 import os
 import shutil
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -130,7 +131,7 @@ def test_zcode_install_restores_config_and_plugin_when_config_write_fails(tmp_pa
     config_before = zcode.zcode_config_file().read_bytes()
     original_write = zcode._write_json
 
-    def fail_config(path: Path, value: dict) -> None:
+    def fail_config(path: Path, value: dict[str, Any]) -> None:
         if path == zcode.zcode_config_file():
             raise OSError("simulated write failure")  # noqa: TRY003
         original_write(path, value)

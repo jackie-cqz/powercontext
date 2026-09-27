@@ -24,6 +24,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -47,7 +48,9 @@ class DeterministicSourcePipeline:
         )
 
 
-def _invoke_hook(*, node: str, base_url: str, scope_id: str, session_id: str, turn_id: str, prompt: str) -> dict:
+def _invoke_hook(
+    *, node: str, base_url: str, scope_id: str, session_id: str, turn_id: str, prompt: str
+) -> dict[str, Any]:
     environment = dict(os.environ)
     environment.update(POWERCONTEXT_ZCODE_SERVER_URL=base_url, POWERCONTEXT_ZCODE_SCOPE_ID=scope_id)
     result = subprocess.run(
