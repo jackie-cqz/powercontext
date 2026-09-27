@@ -1,7 +1,7 @@
 ---
 status: community
 title: ZCode
-description: 安装 PowerContext ZCode 插件，验证自动召回、Source 采集和 MCP 记忆读写。
+description: 安装 PowerContext ZCode 插件，验证自动生成 Memory、新会话召回和 MCP 记忆读写。
 ---
 
 # ZCode
@@ -9,7 +9,9 @@ description: 安装 PowerContext ZCode 插件，验证自动召回、Source 采�
 `community` · `experimental`
 
 本集成支持[开源 ZCode CLI](https://github.com/zai-org/ZCode)。官方 Windows 桌面版 3.14.3 已用真实
-PowerContext Server 和 GLM-5.3-Flash 验证 Hook、MCP Memory 读写；其他官方版本及桌面版 Handoff 尚未验证。
+PowerContext Server 和 GLM-5.3-Flash 验证普通提示词采集、自动生成 Memory、新会话召回及 MCP Memory 读写。
+同一版本也已验证 Handoff 的准备、临时读取、提交和新会话读取，以及本地 Bearer 鉴权与断服恢复。
+其他官方版本及远程 HTTPS 连接尚未验证。
 
 ## 安装匹配的 Server 和插件
 
@@ -38,16 +40,42 @@ powercontext setup zcode --source 'C:\path\to\powercontext'
 
 ## 启动 Server 和宿主
 
-需要自动从 Source 提取 Memory 时，先配置 Server 的 Generation 模型和定时处理，并校验配置：
+需要自动从 Source 提取 Memory 时，先为独立运行的 Server 配置 Generation 和 Memory 定时处理。
+首次配置可运行向导；已有 Server 配置时，保留原有存储、监听和鉴权设置：
 
 ```bash
 powercontext config init --output powercontext.env
+```
+
+例如，使用 Z.ai 的 GLM Coding Plan API Key 处理**编程项目**的记忆，可在仅供 Server 读取的
+`powercontext.env` 中配置，并将该文件排除在 Git 提交之外：
+
+```dotenv
+POWERCONTEXT_SERVER_INFERENCE_GENERATION_MODEL=openai-chat:glm-5.3-flash
+OPENAI_BASE_URL=https://api.z.ai/api/coding/paas/v4
+OPENAI_API_KEY=<你的 Coding Plan API Key>
+POWERCONTEXT_SERVER_RUNTIME_MEMORY_SCHEDULE_SECONDS=60
+```
+
+BigModel 国内 Coding Plan 的 `OPENAI_BASE_URL` 应为 `https://open.bigmodel.cn/api/coding/paas/v4`。
+Coding Plan 的专用端点仅用于 Coding 场景，不能与通用 API 端点混用；具体账户和模型可用性见
+[ZCode 官方模型配置](https://zcode.z.ai/cn/docs/configuration)。`ZCODE_CODING_PLAN_API_KEY` 不会自动映射到
+Server 所需的 `OPENAI_API_KEY`。配置完成后运行：
+
+```bash
 powercontext config validate --env-file powercontext.env
 powercontext server run --env-file powercontext.env
 ```
 
+已有持久化数据库首次启用 Generation 处理能力时，直接用新配置启动可能报
+`Processing configuration differs from the completed maintenance manifest`。这时先用新配置执行只读
+`powercontext server processing-migrate --action plan --env-file powercontext.env`；备份数据库并停止旧 Server、
+Worker 和写入后，按[后台处理状态迁移](../operate/artifact-processing-migration.md)使用新的 migration ID 执行
+`apply`、`verify`。仅在验证返回 `ready: true` 后启动新配置。不要通过删除原数据库来绕过迁移。
+
 Server 是独立进程，保持它运行。显式 `remember_memory` 写入和全文检索不依赖 Generation 或 Embedding；
 未配置这些模型时，Server 仍可健康运行，但不会自动从普通 Source 生成 Memory，语义检索也不可用。
+`/health/ready` 中的 `inference.generation: ready` 只说明连接已配置；真实提取须检查 Memory 及 Source 引用。
 模型和处理设置见[配置模型与完整记忆](../get-started/configure-models.md)。
 
 Hook 和 MCP 使用安装时保存的同一个 Server URL，默认 `http://127.0.0.1:8000`。
@@ -55,13 +83,21 @@ Server 使用其他地址时，重新运行 `powercontext setup zcode --server-u
 非环回明文 HTTP 还需在 setup 时显式传入 `--allow-insecure-http`。只在启动 ZCode 的终端修改
 `POWERCONTEXT_ZCODE_SERVER_URL`，不会覆盖已安装插件保存的 URL。
 
+连接远程 Server 时，在远端启用访问控制，将 PowerContext Server 放在有效证书的 HTTPS 反向代理后，
+再用上述 `https://host` 地址安装插件。按[部署认证](../operate/deploy-server.md)配置 Server 身份与 Token；
+启动 ZCode 的进程提供完整的 `POWERCONTEXT_ZCODE_AUTHORIZATION`，如下一节所示。
+验收时分别检查无凭据请求被拒绝、ZCode MCP 工具成功，以及普通提示词在同一远程 Scope 中形成 Source。
+本集成尚未在实际跨机器 HTTPS 环境做过这些检查。
+
 启动 ZCode 前准备一个已有 Scope：使用 Server 默认 Scope，或为 ZCode workspace/session 建立持久 binding；
 也可用 `POWERCONTEXT_ZCODE_SCOPE_ID` 显式指定。Hook 不会自动创建 Scope。项目隔离方法见
 [Scope 与访问控制](../workflows/scopes-and-access.md)。官方桌面版的模型凭据由 ZCode 自身管理；
 ZCode 的 GLM Coding Plan API Key 不会自动成为 PowerContext Server 的 Generation 凭据。
 
 `.env` 可以通过 `powercontext setup --env-file .env zcode` 提供安装参数，但 ZCode 进程不会因此自动读取该文件。
-模型 API Key、PowerContext 授权变量等运行时配置必须在启动宿主时可用。不要把密钥写进插件目录。
+Generation 的 `OPENAI_API_KEY` 应提供给 Server 进程，例如写在其 `--env-file` 指定的文件中；
+ZCode 自身的模型凭据由 ZCode 管理。
+PowerContext 授权变量必须在启动 ZCode 时可用。不要把密钥写进插件目录。
 
 ## 诊断安装与运行中的配置
 
@@ -98,7 +134,23 @@ Hook 为同一 Scope、session、turn 和提示词计算稳定 Source ID。若�
 重复的相同文本会保守地复用 Source ID，无法区分独立提交和重试。默认采集提示词；疑似包含密钥的
 文本不会自动采集。准备上下文与采集相互独立：前者失败后仍可能采集，后者失败也不会丢弃已准备的上下文。
 
-## 验证写入和新会话召回
+## 验证自动采集、处理和新会话召回
+
+这项验收不调用 `remember_memory`，也不手动调用 `memory/flush`：
+
+1. 准备一个独立 Scope，将它设为 Server 默认 Scope 或绑定到 ZCode workspace。确认其中没有目标测试事实。
+2. 在 ZCode 会话中发送包含独特代号的普通**持久决策或约束**，不要求 Agent 使用记忆工具。
+   核对 `POST /v1/sources/content` 返回 `202 accepted`，并在同一 Scope 中找到该 Source。
+3. 等待 Memory 调度处理。通过 `POST /v1/memory/entries/list` 或 `POST /v1/memory/search` 找到新条目，
+   核对 `source_refs` 指向第 2 步采集的 Source。Cursor 前进但没有条目，可能只是该提示词不符合
+   Memory 提取规则；普通问答或容易从代码重新查到的事实并不保证被保存。
+4. 在同一 Scope 下开启全新 ZCode 会话，提问时不要包含代号。核对该轮 `context/prepare` 返回 `ready`、
+   模型输入包含 PowerContext 注入的事实，以及回答中的代号。仅看最终答案不足以证明召回路径。
+
+官方 Windows 桌面版 3.14.3 已在隔离 Scope 中用真实 GLM-5.3-Flash 完成上述链路：Memory 条目引用了
+ZCode Hook 采集的 Source，新会话模型输入包含 PreparedContext，并正确回答未在新问题中出现的代号。
+
+## 验证显式写入和新会话召回
 
 这是会写入测试证据的验收。先确认 Server、插件和 Scope 已准备好，再使用独特的合成事实：
 
@@ -109,8 +161,8 @@ Hook 为同一 Scope、session、turn 和提示词计算稳定 Source ID。若�
 3. 在同一 Scope 下开启全新 ZCode 会话，询问测试颜色；同时核对该轮的 `context/prepare` 与实际注入。
    只凭最终答案正确，无法排除模型从当前提示词或旧会话文本获知答案。
 
-官方 Windows 桌面版 3.14.3 已用真实 GLM-5.3-Flash 会话验证 Hook 注入、Source 持久化、
-`search_memory` 返回已存在的 Memory，以及 `remember_memory` 写入后可由 Server 搜索。
+官方 Windows 桌面版 3.14.3 已验证 `search_memory` 返回已存在的 Memory，以及 `remember_memory`
+写入后可由 Server 搜索。这与上一节的自动提取是两条独立路径。
 开源 CLI 的宿主测试可运行：
 
 ```bash
@@ -119,6 +171,15 @@ node --test integrations/zcode/plugins/powercontext/tests/host.test.mjs
 ```
 
 第二条需要将 `ZCODE_CLI_BIN` 指向已构建的开源 CLI；它使用模拟模型和 Server，不能代替真实宿主验收。
+官方 Windows 桌面版 3.14.3 已分别连接本地无鉴权与 Bearer 鉴权 Server：MCP `list_scopes` 成功，
+普通提示词经 Hook 形成可读回的 Source。断服期间普通对话仍能回答；Server 恢复后，无需重启 ZCode，
+MCP 读取和 Hook 采集重新成功。Handoff 已完成 `handoff_current_work` → `continue_handoff`（prepared）→
+`commit_handoff` → 全新会话 `continue_handoff`（latest），提交的 revision 1 能从 Server 读回。
+其他已实测工具包括 `get_scope`、`list_memory_entries`、`capture_content_source`、
+`list_artifact_candidates` 和 `list_dream_runs`；后两者返回合法的空列表。
+另在由 Windows 登录用户创建的全新用户目录中安装插件，官方桌面版通过 MCP `list_scopes` 读取隔离 Server，
+Hook 也把该轮普通提示词写成 Source。远程 HTTPS 连接与其他官方版本尚未实测。
+开源 CLI 尚未用真实模型与真实 Server 联合跑完整链路。
 
 ## 理解插件行为
 
@@ -126,7 +187,8 @@ node --test integrations/zcode/plugins/powercontext/tests/host.test.mjs
 
 - `UserPromptSubmit` Hook 在模型分析当前提示词前，请求最多 8000 字节的 PreparedContext，并独立采集提示词为 Source；
 - ZCode 原生 MCP 客户端加载插件的 `.mcp.json`，暴露显式 Memory 和 Handoff 工具，例如 `search_memory`、
-  `remember_memory`。Handoff 在官方桌面版 3.14.3 尚未完成真实宿主验收。
+  `remember_memory`。首次 Handoff 的 `base` 和 `generation` 可以为 `null`，后续工具应原样传递
+  `PreparedHandoff`，不要省略或编造字段。读取结果标记为 `untrusted_history`，需结合当前项目状态核实。
 
 Hook 按 `POWERCONTEXT_ZCODE_SCOPE_ID`、当前 session binding、workspace binding、Server 默认 Scope
 解析 Scope。workspace 使用 Git 根目录或工作目录的规范化路径哈希作为 binding key；路径本身不是 Scope ID。
@@ -138,6 +200,9 @@ Hook 按 `POWERCONTEXT_ZCODE_SCOPE_ID`、当前 session binding、workspace bind
 PowerContext 工具未出现在会话里时，先完全退出并重启 ZCode，再查 `plugins.dirs`、插件目录和 `.mcp.json`。
 工具已出现但调用失败时，检查 MCP 结果中的 Scope、鉴权、Server URL 和 HTTP 错误；不要把模型的文字
 回答当成工具结果。`doctor zcode` 只核对声明，不会发起 `search_memory` 或 `remember_memory`。
+在 Windows 上，安装插件的目录还必须可由启动桌面版的账户读取。若另一个受限账户创建了目录，安装账户下的
+`doctor` 可能通过，但桌面版会报 `plugin_manifest_not_found`。用桌面版账户检查
+`Test-Path <插件目录>\.zcode-plugin\plugin.json`；若显示拒绝访问，请用该账户在其可读的新目录重新安装。
 
 自动 Hook 失败不会中断 ZCode 对话。Hook 将脱敏的 `component=powercontext.zcode`、阶段和 code 写入
 stderr，宿主是否展示取决于其日志配置。常见结果如下：

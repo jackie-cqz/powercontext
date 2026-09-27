@@ -1,7 +1,7 @@
 ---
 status: community
 title: ZCode
-description: Install the PowerContext ZCode plugin and verify recall, Source capture, and MCP Memory operations.
+description: Install the PowerContext ZCode plugin and verify automatic Memory generation, recall, and MCP operations.
 ---
 
 # ZCode
@@ -10,7 +10,9 @@ description: Install the PowerContext ZCode plugin and verify recall, Source cap
 
 This integration supports the [open-source ZCode CLI](https://github.com/zai-org/ZCode). The official Windows desktop
 app version 3.14.3 has also been exercised with a live PowerContext Server and GLM-5.3-Flash:
-its Hook and MCP Memory read/write paths worked. Other official releases and desktop Handoff workflows remain unverified.
+ordinary prompt capture, automatic Memory generation, fresh-session recall, and MCP Memory read/write worked.
+The same release also passed Handoff preparation, temporary resolution, commit, and fresh-session resolution, plus
+local Bearer authentication and recovery after a Server outage. Other official releases and remote HTTPS remain unverified.
 
 ## Install matching Server and plugin versions
 
@@ -41,22 +43,58 @@ the old process running with its previous plugin configuration.
 
 ## Start the Server and the host
 
-To extract Memory automatically from Sources, configure the Server's Generation model and background processing:
+To extract Memory automatically from Sources, configure the separately running Server's Generation model and Memory
+schedule. For a first-time setup, use the configuration wizard. Preserve existing storage, listener, and authentication
+settings when updating a Server that already has data:
 
 ```bash
 powercontext config init --output powercontext.env
+```
+
+For example, a Server processing **coding project** memories with a Z.ai GLM Coding Plan API key can use these settings
+in `powercontext.env`. Keep that file out of Git:
+
+```dotenv
+POWERCONTEXT_SERVER_INFERENCE_GENERATION_MODEL=openai-chat:glm-5.3-flash
+OPENAI_BASE_URL=https://api.z.ai/api/coding/paas/v4
+OPENAI_API_KEY=<your Coding Plan API key>
+POWERCONTEXT_SERVER_RUNTIME_MEMORY_SCHEDULE_SECONDS=60
+```
+
+For a BigModel China Coding Plan, use `https://open.bigmodel.cn/api/coding/paas/v4` as `OPENAI_BASE_URL`. Coding Plan
+endpoints are for coding use and differ from general API endpoints. Check account and model availability in the
+[official ZCode model configuration guide](https://zcode.z.ai/cn/docs/configuration). `ZCODE_CODING_PLAN_API_KEY` is
+not automatically mapped to the Server's `OPENAI_API_KEY`. Then validate and start the Server:
+
+```bash
 powercontext config validate --env-file powercontext.env
 powercontext server run --env-file powercontext.env
 ```
 
+When first enabling Generation processing on an existing persistent database, startup may report
+`Processing configuration differs from the completed maintenance manifest`. First inspect the read-only plan with
+`powercontext server processing-migrate --action plan --env-file powercontext.env`. Back up the database and stop the
+old Server, Workers, and writes before running `apply` and `verify` with a new migration ID as described in
+[Artifact processing migration](../operate/artifact-processing-migration.md). Start the new configuration only after
+verification returns `ready: true`. Do not discard the database to bypass the migration.
+
 Keep the separate Server process running. Explicit `remember_memory` writes and full-text search need neither
 Generation nor Embedding. A Server without them can be healthy, but it cannot automatically turn ordinary Sources into
-Memory or provide semantic search. See [Configure models and complete Memory](../get-started/configure-models.md).
+Memory or provide semantic search. `inference.generation: ready` in `/health/ready` confirms configuration, not a
+successful extraction; inspect the Memory entry and its Source references for that. See
+[Configure models and complete Memory](../get-started/configure-models.md).
 
 The Hook and MCP use the same Server URL saved by setup, defaulting to `http://127.0.0.1:8000`. For another endpoint,
 rerun `powercontext setup zcode --server-url https://host --source /path/to/powercontext`. Non-loopback plaintext HTTP also requires
 `--allow-insecure-http` at setup. Changing `POWERCONTEXT_ZCODE_SERVER_URL` in a launch terminal does not replace the
 URL saved by a normally installed plugin.
+
+For a remote Server, enable access control and put the Server behind an HTTPS reverse proxy with a valid certificate,
+then install the plugin with that `https://host` URL. Configure the Server identity and token as described in
+[Deployment authentication](../operate/deploy-server.md), and give the launching ZCode process the full
+`POWERCONTEXT_ZCODE_AUTHORIZATION` value described below. Acceptance should check that an unauthenticated request is
+rejected, a ZCode MCP tool succeeds, and an ordinary prompt becomes a Source in the same remote Scope. This integration
+has not yet been tested across machines over HTTPS.
 
 Prepare an existing Scope before launching ZCode: use the Server default, a persistent ZCode workspace/session binding,
 or an explicit `POWERCONTEXT_ZCODE_SCOPE_ID`. The Hook does not create a Scope. See
@@ -64,8 +102,9 @@ or an explicit `POWERCONTEXT_ZCODE_SCOPE_ID`. The Hook does not create a Scope. 
 its GLM Coding Plan API key does not automatically configure PowerContext Server Generation.
 
 `powercontext setup --env-file .env zcode` can read setup parameters from `.env`; it does not cause the ZCode process
-to load that file. Model keys and PowerContext authorization variables must be available when the host starts. Keep
-secrets out of the plugin directory.
+to load that file. Provide Generation's `OPENAI_API_KEY` to the Server process, for example through its `--env-file`;
+ZCode manages its own model credential. PowerContext authorization variables must be available when the host starts.
+Keep secrets out of the plugin directory.
 
 ## Diagnose installation and running configuration
 
@@ -105,7 +144,28 @@ text in one session conservatively reuses a Source ID and cannot distinguish a n
 capture is enabled by default, while text resembling a secret is not captured automatically. Preparation and capture
 are independent: one can succeed when the other fails.
 
-## Verify writes and fresh-session recall
+## Verify automatic capture, processing, and fresh-session recall
+
+This acceptance path calls neither `remember_memory` nor `memory/flush` manually:
+
+1. Prepare an isolated Scope, make it the Server default or bind it to the ZCode workspace, and confirm it has no
+   matching test fact.
+2. Send an ordinary prompt in ZCode containing a unique, durable coding project decision or constraint. Do not ask
+   the agent to call a Memory tool. Confirm `POST /v1/sources/content` returns `202 accepted` and the Source exists in
+   the same Scope.
+3. Wait for the Memory scheduler. Find the new entry with `POST /v1/memory/entries/list` or
+   `POST /v1/memory/search` and confirm its `source_refs` point to the Source from step 2. A cursor advance without a
+   new entry can mean that the prompt did not meet Memory extraction rules; ordinary questions and facts easily
+   recovered from code are not guaranteed to be saved.
+4. Start a fresh ZCode session in the same Scope. Ask without including the unique code. Confirm that this turn's
+   `context/prepare` returns `ready`, the model input contains the fact injected by PowerContext, and the answer
+   gives the code. The answer alone does not establish the recall path.
+
+Official Windows desktop version 3.14.3 completed this path with a live GLM-5.3-Flash model and an isolated Scope:
+the generated Memory entry referenced the ZCode Hook's Source, and the fresh-session model input contained
+PreparedContext before the model answered with a code absent from the new question.
+
+## Verify explicit writes and fresh-session recall
 
 This acceptance procedure writes test evidence. After preparing the Server, plugin, and Scope, use a unique synthetic fact:
 
@@ -119,6 +179,8 @@ This acceptance procedure writes test evidence. After preparing the Server, plug
 
 Official Windows desktop version 3.14.3 has passed live GLM-5.3-Flash checks for Hook injection, persisted Source,
 `search_memory` returning an existing entry, and `remember_memory` writing an entry searchable through the Server.
+This explicit write path is separate from the automatic extraction path above.
+
 For the open-source CLI, run the plugin and host tests:
 
 ```bash
@@ -127,7 +189,16 @@ node --test integrations/zcode/plugins/powercontext/tests/host.test.mjs
 ```
 
 The second command needs `ZCODE_CLI_BIN` pointing to a built CLI. It uses a fake model and Server and does not replace
-a live-host acceptance run.
+a live-host acceptance run. Official Windows desktop 3.14.3 connected to local unauthenticated and Bearer-authenticated
+Servers: MCP `list_scopes` succeeded, and ordinary prompts became readable Sources through the Hook. An ordinary
+conversation continued during a Server outage; after recovery, MCP reads and Hook capture resumed without restarting
+ZCode. Handoff completed `handoff_current_work` → `continue_handoff` (prepared) → `commit_handoff` → fresh-session
+`continue_handoff` (latest), and revision 1 was read back from the Server. Other exercised tools include `get_scope`,
+`list_memory_entries`, `capture_content_source`, `list_artifact_candidates`, and `list_dream_runs`; the last two
+returned valid empty lists. A plugin installed in a fresh directory created by the Windows login user also passed
+official desktop MCP `list_scopes` and Hook Source capture against the isolated Server. Remote HTTPS and other official
+releases remain unverified. The open-source CLI has not yet run a combined real-model and real-Server end-to-end
+acceptance test.
 
 ## Understand what the plugin does
 
@@ -136,7 +207,9 @@ The plugin reaches the same PowerContext Server through two paths:
 - The `UserPromptSubmit` Hook requests up to 8000 bytes of PreparedContext before the model analyzes a prompt and
   independently captures that prompt as a Source.
 - ZCode's native MCP client loads the plugin's `.mcp.json` and exposes explicit Memory and Handoff tools, including
-  `search_memory` and `remember_memory`. Desktop Handoff has not yet had a live-host acceptance check.
+  `search_memory` and `remember_memory`. For a first Handoff, `base` and `generation` may be `null`; pass the
+  `PreparedHandoff` to follow-up tools exactly, without omitting or inventing fields. Resolved content is marked
+  `untrusted_history` and should be checked against the current project state.
 
 The Hook selects a Scope through `POWERCONTEXT_ZCODE_SCOPE_ID`, then current session binding, workspace binding, and
 finally the Server default. A canonical Git-root or workspace path is hashed into an external binding key; the path
@@ -150,6 +223,10 @@ If PowerContext tools are absent, fully quit and reopen ZCode, then inspect `plu
 `.mcp.json`. If a tool is present but fails, inspect its result for Scope, authorization, Server URL, and HTTP errors;
 the model's prose is not a tool result. `doctor zcode` checks declarations and does not call `search_memory` or
 `remember_memory`.
+On Windows, the account running the desktop app must be able to read the installed plugin. If another restricted
+account created the directory, `doctor` under that account can pass while the desktop app reports
+`plugin_manifest_not_found`. Check `Test-Path <plugin directory>\.zcode-plugin\plugin.json` as the desktop user; if
+access is denied, reinstall into a fresh directory that user can read.
 
 Automatic Hook failures leave the ZCode conversation running. The Hook writes a redacted
 `component=powercontext.zcode`, stage, and code to stderr; whether ZCode displays them depends on its logging setup.

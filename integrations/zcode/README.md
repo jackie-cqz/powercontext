@@ -6,4 +6,4 @@ Install and diagnose it with `powercontext setup zcode --source /path/to/powerco
 
 See the [English guide](../../docs/en/docs/integrations/zcode.md) or [中文指南](../../docs/zh/docs/integrations/zcode.md) for Scope setup, `.env`, authentication, capture controls, remote transport, validation, and uninstall instructions.
 
-The official Windows desktop version 3.14.3 has been verified with live context injection, prompt capture, and MCP `search_memory` and `remember_memory` calls. Other official versions and desktop Handoff operations remain unverified.
+The official Windows desktop version 3.14.3 has been verified with live prompt capture, scheduled Memory generation, context injection and fresh-session recall, MCP Memory and Handoff calls, local Bearer authentication, recovery after a Server outage, and a fresh user-owned directory installation. These checks used local Servers. Remote HTTPS, other official versions, and a combined real-model/real-Server open-source CLI run remain unverified.
