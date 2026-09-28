@@ -56,7 +56,9 @@ from powercontext.builtin.artifacts.handoff import (
 from powercontext.builtin.artifacts.memory import (
     EmbeddingProfile,
     Memory,
+    MemoryCapacity,
     MemoryCitation,
+    MemoryCompactionResult,
     MemoryEntryInput,
     MemoryEntryVersion,
     MemoryHit,
@@ -161,6 +163,7 @@ from powercontext.builtin.runtime._scope_cache import (
     ScopeCacheObserver,
     ScopeEvictor,
 )
+from powercontext.builtin.runtime.decision_model import DecisionModel
 from powercontext.builtin.runtime.errors import InvalidRuntimeRequestError, TopicMemoryProcessingUnavailableError
 from powercontext.builtin.runtime.models import (
     ApproveArtifactCandidateRequest,
@@ -2457,6 +2460,36 @@ class ScopedMemoryApplication:
                         rerank=result.rerank,
                     )
 
+    async def capacity(self) -> MemoryCapacity:
+        """Read capacity of the Scope's current Memory, or raise when it does not exist."""
+
+        async with self._runtime._context(self.scope_id) as context:
+            service = context.artifacts.memory
+            current = await service.head(context.artifacts.memory_artifact_id)
+            _validate_memory_identity(context.artifacts.memory_artifact_id, current)
+            return await service.capacity(current)
+
+    async def compact(
+        self,
+        *,
+        dry_run: bool = False,
+        limit: int | None = None,
+        reason: str | None = None,
+        expected_revision: int | None = None,
+    ) -> MemoryCompactionResult:
+        """Explicitly compact the Scope's current Memory under the configured policy.
+
+        Enablement permits commits; it does not schedule them. Previews also work
+        while disabled. Pass the preview's revision to reject a changed head.
+        """
+
+        async with self._runtime._context(self.scope_id) as context, self._runtime._locked(self.scope_id):
+            service = context.artifacts.memory
+            current = await service.head(context.artifacts.memory_artifact_id)
+            _validate_memory_identity(context.artifacts.memory_artifact_id, current)
+            _validate_expected_revision(current, expected_revision)
+            return await service.compact(current, dry_run=dry_run, limit=limit, reason=reason)
+
     async def list(self, *, include_inactive: bool = False, tag_filter: TagFilter | None = None) -> MemoryEntriesPage:
         async with self._runtime._context(self.scope_id) as context:
             service = context.artifacts.memory
@@ -2969,6 +3002,7 @@ class BuiltinRuntime:
         prompt_service: PromptService | None = None,
         recall_token_estimator: RecallTokenEstimator | None = None,
         recall_effort_sink: RecallEffortSink | None = None,
+        decision_model: DecisionModel | None = None,
         publication_application: ArtifactPublicationApplication | None = None,
         scope_application: ScopeApplication | None = None,
         readiness: RuntimeReadinessChecks | None = None,
@@ -3024,6 +3058,9 @@ class BuiltinRuntime:
         self._prompt_service = prompt_service
         self._recall_token_estimator = recall_token_estimator
         self._recall_effort_sink = recall_effort_sink
+        # Public read-only seam for the cross-family decision role; deterministic Runtime callers
+        # (and tests) read it directly, and it is always fail-open wrapped before it gets here.
+        self.decision_model = decision_model
         self.publications = publication_application
         self.scopes = scope_application
         self._readiness = RuntimeReadinessChecks() if readiness is None else readiness
