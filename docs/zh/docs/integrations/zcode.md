@@ -140,6 +140,31 @@ Hook 为同一 Scope、session、turn 和提示词计算稳定 Source ID。若�
 重复的相同文本会保守地复用 Source ID，无法区分独立提交和重试。默认采集提示词；疑似包含密钥的
 文本不会自动采集。准备上下文与采集相互独立：前者失败后仍可能采集，后者失败也不会丢弃已准备的上下文。
 
+## 主动操作的 Scope 与工作流
+
+普通提示词 Hook 会提供本轮的 Scope、session 和已安装 Scope 脚本路径，另行标记为 current-request binding metadata。
+即使历史召回为空，这份元数据也可用于主动操作。它来自本轮绑定解析，不是旧 Memory；不要从历史内容提取 session 或 Scope。
+
+在模型主动调用 Memory、Handoff 或候选工具前，使用该脚本核对当前绑定。外部 PowerShell 可这样执行：
+
+```powershell
+$plugin = Join-Path $HOME '.zcode/cli/plugins/powercontext'
+node (Join-Path $plugin 'scripts/scope.mjs') resolve --cwd (Get-Location).Path --session-id '<当前精确 session ID>'
+```
+
+普通终端没有 session 时可省略参数，但输出 `session_key_used: false` 只证明 workspace 解析，不证明当前会话不存在更高优先级的
+session binding。需要会话内写入时，取得真实身份或设置已有的显式 `POWERCONTEXT_ZCODE_SCOPE_ID`。脚本与 Hook 使用同一保存的 endpoint。
+
+明确要求改变当前 checkout 的绑定时，使用 `bind --scope-id <精确 ID>` 或 `unbind`；仍传入相同 `--cwd` 和 session。
+脚本只改变 workspace binding，再解析当前 Scope。显式 Scope/session binding 可遮盖该修改，结果会分别显示绑定结果和实际 Scope；
+不会自动删除其他 binding。绑定已成功而后续解析失败时，输出仍保留成功的绑定结果；重新解析后才能宣称会话 Scope 已切换。
+远程工作区模式不支持本地绑定写入，并要求显式 Scope。
+
+插件 Skill 按需加载三份指导：Scope/Memory、Work Handoff、候选审核。普通交接返回临时 carrier；只有明确要求持久里程碑才提交。
+接续后以精确 prepared/revision 目标确认接收；任务完成或中断记录保留真实 Receipt 引用和检查结果。
+Memory 修改使用当前 citation，候选决策使用当前 expected_version；版本冲突后重读，不自动批准变化后的内容。
+仅有工具配置不代表工具已加载；缺失 MCP 工具时报告未完成，不用 HTTP/shell 替代领域操作。
+
 ## 验证自动采集、处理和新会话召回
 
 这项验收不调用 `remember_memory`，也不手动调用 `memory/flush`：

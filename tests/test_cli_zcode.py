@@ -48,6 +48,10 @@ def _checkout(root: Path) -> Path:
     (plugin / ".zcode-plugin" / "plugin.json").write_text('{"name":"powercontext"}', encoding="utf-8")
     (plugin / "hooks").mkdir()
     (plugin / "hooks" / "user_prompt_submit.mjs").write_text("// hook", encoding="utf-8")
+    for folder, names in {"shared": ("settings.mjs", "transport.mjs", "scope.mjs"), "scripts": ("scope.mjs",)}.items():
+        (plugin / folder).mkdir()
+        for name in names:
+            (plugin / folder / name).write_text("// module", encoding="utf-8")
     (plugin / "hooks" / "hooks.json").write_text(
         '{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"process"}]}]}}', encoding="utf-8"
     )
@@ -218,3 +222,13 @@ def test_zcode_git_ref_route_and_later_setup_failure_restore_prior_state(tmp_pat
     assert requested == [("owner/powercontext", "v1.2.3")] * 2
     assert zcode.zcode_config_file().read_bytes() == config_before
     assert (Path(first.plugin_path) / "keep.txt").read_text(encoding="utf-8") == "previous"
+
+
+def test_zcode_diagnostics_detect_missing_installed_scope_dependency(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(zcode, "zcode_config_file", lambda: tmp_path / "home/.zcode/cli/config.json")
+    monkeypatch.setattr(zcode, "zcode_executable", lambda: "zcode")
+    checkout = tmp_path / "checkout"
+    _checkout(checkout)
+    result = zcode.install_zcode_plugin(source=str(checkout), ref="unused")
+    (Path(result.plugin_path) / "shared/scope.mjs").unlink()
+    assert not zcode.run_zcode_diagnostics()["hooks"].ok

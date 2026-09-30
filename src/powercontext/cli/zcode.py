@@ -289,22 +289,27 @@ def run_zcode_diagnostics() -> dict[str, Diagnostic]:
     except SetupError:
         diagnostics["plugin"] = Diagnostic(failed, "ZCode user config is invalid or unreadable")
     hook = destination / "hooks" / "user_prompt_submit.mjs"
+    modules = [
+        hook,
+        *(destination / "shared" / name for name in ("settings.mjs", "transport.mjs", "scope.mjs")),
+        destination / "scripts" / "scope.mjs",
+    ]
     hooks_file = destination / "hooks" / "hooks.json"
     try:
         declared = json.loads(hooks_file.read_text(encoding="utf-8"))
-        hook_ok = hook.is_file() and bool(declared["hooks"]["UserPromptSubmit"])
+        hook_ok = all(module.is_file() for module in modules) and bool(declared["hooks"]["UserPromptSubmit"])
     except (OSError, ValueError, KeyError, TypeError):
         hook_ok = False
     node = which("node")
     if hook_ok and node:
         try:
-            checked = subprocess.run(  # noqa: S603 - fixed Node executable and managed Hook path.
-                [node, "--check", str(hook)],
-                capture_output=True,
-                check=False,
-                timeout=5,
+            hook_ok = all(
+                subprocess.run(  # noqa: S603 - fixed Node executable and managed plugin path.
+                    [node, "--check", str(module)], capture_output=True, check=False, timeout=5
+                ).returncode
+                == 0
+                for module in modules
             )
-            hook_ok = checked.returncode == 0
         except (OSError, subprocess.SubprocessError):
             hook_ok = False
     else:

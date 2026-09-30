@@ -152,6 +152,36 @@ text in one session conservatively reuses a Source ID and cannot distinguish a n
 capture is enabled by default, while text resembling a secret is not captured automatically. Preparation and capture
 are independent: one can succeed when the other fails.
 
+## Scope for explicit operations and workflows
+
+The prompt Hook supplies current-request binding metadata separately from recalled history: the exact Scope, session
+identity and installed Scope script path. This metadata remains available when recall is empty. Never take session or
+Scope identity from historical Memory.
+
+Before explicit Memory, Handoff or candidate operations, verify that binding with the script. From PowerShell:
+
+```powershell
+$plugin = Join-Path $HOME '.zcode/cli/plugins/powercontext'
+node (Join-Path $plugin 'scripts/scope.mjs') resolve --cwd (Get-Location).Path --session-id '<exact current session ID>'
+```
+
+An external terminal may omit the session, but `session_key_used: false` proves only workspace resolution, not absence
+of a higher-priority session binding. Obtain the real session or configure an existing explicit
+`POWERCONTEXT_ZCODE_SCOPE_ID` before session-bound writes. The script and Hook use the same saved endpoint.
+
+On an explicit binding request, use `bind --scope-id <exact ID>` or `unbind` with the same cwd/session. Only workspace
+binding changes; the script resolves again and reports binding and effective Scope separately. Explicit or session
+binding may shadow the change. Other bindings are never silently removed. If verification fails after a confirmed
+write, the output retains that write result; resolve again before claiming the current Scope switched.
+Remote-workspace mode disables local binding writes and requires an explicit Scope.
+
+The Skill routes to Scope/Memory, Work Handoff and candidate-review references. Ordinary transfer is temporary;
+committing a durable milestone needs explicit intent. Continue and acknowledge preserve an exact prepared/revision
+target; task outcomes keep the actual Receipt reference and check results. Memory changes preserve current citations,
+and candidate decisions use current versions. Re-read conflicts; old approval does not authorize changed content.
+Configured tools are not proof of discovery. Missing MCP operations remain incomplete; HTTP/shell does not substitute
+for a required Memory/Handoff/candidate MCP call.
+
 ## Verify automatic capture, processing, and fresh-session recall
 
 This acceptance path calls neither `remember_memory` nor `memory/flush` manually:
