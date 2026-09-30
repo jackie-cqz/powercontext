@@ -6,11 +6,12 @@ description: Install the PowerContext ZCode plugin and verify automatic Memory g
 
 # ZCode
 
-`community` · `experimental`
+`community`
 
 This integration supports the [open-source ZCode CLI](https://github.com/zai-org/ZCode). The official Windows desktop
-app version 3.14.3 has also been exercised with a live PowerContext Server and GLM-5.3-Flash:
+app version 3.14.3 has also been exercised with a live PowerContext Server:
 ordinary prompt capture, automatic Memory generation, fresh-session recall, and MCP Memory read/write worked.
+The current acceptance used GLM-5.3 for the host and `openai-chat:glm-5.3-flash` for Server Generation.
 The same release also passed Handoff preparation, temporary resolution, commit, and fresh-session resolution, plus
 local Bearer authentication and ordinary task continuity during a Server outage. The open-source CLI has also passed remote HTTPS
 validation through an SSH port forward. Direct HTTPS ingress and other official releases remain unverified.
@@ -308,9 +309,10 @@ This acceptance path calls neither `remember_memory` nor `memory/flush` manually
    `context/prepare` returns `ready`, the model input contains the fact injected by PowerContext, and the answer
    gives the code. The answer alone does not establish the recall path.
 
-Official Windows desktop version 3.14.3 completed this path with a live GLM-5.3-Flash model and an isolated Scope:
-the generated Memory entry referenced the ZCode Hook's Source, and the fresh-session model input contained
-PreparedContext before the model answered with a code absent from the new question.
+Official Windows desktop version 3.14.3 completed this path in an isolated Scope with GLM-5.3 for the host and
+`openai-chat:glm-5.3-flash` for Server Generation. Public readback confirmed that Memory referenced the Hook's Source.
+Fresh-session Hook observations recorded ready preparation and emitted context; the user reported the exact code
+without including it in the new question.
 
 ## Verify explicit writes and fresh-session recall
 
@@ -324,7 +326,7 @@ This acceptance procedure writes test evidence. After preparing the Server, plug
 3. Open a fresh ZCode session in the same Scope and ask for the validation color. Also inspect that turn's
    `context/prepare` and injected content. A correct final answer alone could come from the prompt or old chat text.
 
-Official Windows desktop version 3.14.3 has passed live GLM-5.3-Flash checks for Hook injection, persisted Source,
+Official Windows desktop version 3.14.3 has passed live-model checks for Hook injection, persisted Source,
 `search_memory` returning an existing entry, and `remember_memory` writing an entry searchable through the Server.
 This explicit write path is separate from the automatic extraction path above.
 
@@ -379,8 +381,8 @@ the correct Scope when called.
 
 If PowerContext tools are absent, fully quit and reopen ZCode, then inspect `plugins.dirs`, the installed plugin, and
 `.mcp.json`. If a tool is present but fails, inspect its result for Scope, authorization, Server URL, and HTTP errors;
-the model's prose is not a tool result. `doctor zcode` checks declarations and does not call `search_memory` or
-`remember_memory`.
+the model's prose is not a tool result. `doctor zcode` checks declarations and performs readonly connectivity and
+Scope probes. It does not call `search_memory` or `remember_memory`, or inspect the running session's native MCP catalog.
 On Windows, the account running the desktop app must be able to read the installed plugin. If another restricted
 account created the directory, `doctor` under that account can pass while the desktop app reports
 `plugin_manifest_not_found`. Check `Test-Path <plugin directory>\.zcode-plugin\plugin.json` as the desktop user; if

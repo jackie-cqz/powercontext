@@ -760,7 +760,7 @@ tests = ["tests/test_cli_workbuddy.py"]
 [[integrations]]
 id = "zcode"
 kind = "agent_host"
-availability = "experimental"
+availability = "master_only"
 capabilities = ["flush_or_checkpoint", "memory_read", "memory_write", "source_capture", "context_injection", "work_contract", "handoff", "acknowledge", "task_outcome", "candidate_review", "experience_read_or_generate", "skill_read_or_generate", "external_skill", "scope_organization", "artifact_publication", "persistent_scope_binding"]
 profiles = ["minimal", "recommended", "full"]
 toolsets = ["server-mcp", "zcode-prompt-hook"]

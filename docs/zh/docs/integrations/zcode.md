@@ -6,10 +6,11 @@ description: 安装 PowerContext ZCode 插件，验证自动生成 Memory、新�
 
 # ZCode
 
-`community` · `experimental`
+`community`
 
 本集成支持[开源 ZCode CLI](https://github.com/zai-org/ZCode)。官方 Windows 桌面版 3.14.3 已用真实
-PowerContext Server 和 GLM-5.3-Flash 验证普通提示词采集、自动生成 Memory、新会话召回及 MCP Memory 读写。
+PowerContext Server 验证普通提示词采集、自动生成 Memory、新会话召回及 MCP Memory 读写。
+本轮宿主模型为 GLM-5.3，Server Generation 为 `openai-chat:glm-5.3-flash`。
 同一版本也已验证 Handoff 的准备、临时读取、提交和新会话读取，以及本地 Bearer 鉴权与断服期间普通对话。
 开源 CLI 还通过 SSH 端口转发验证了跨机器 HTTPS 连接。远端端口的直接 HTTPS 接入及其他官方版本尚未验证。
 开源 CLI 0.16.9 另已在真实本地 Server 上验证普通提示词自动采集、真实模型定时生成带 Source 引用的 Memory，
@@ -270,8 +271,9 @@ Memory 修改使用当前 citation，候选决策使用当前 expected_version�
 4. 在同一 Scope 下开启全新 ZCode 会话，提问时不要包含代号。核对该轮 `context/prepare` 返回 `ready`、
    模型输入包含 PowerContext 注入的事实，以及回答中的代号。仅看最终答案不足以证明召回路径。
 
-官方 Windows 桌面版 3.14.3 已在隔离 Scope 中用真实 GLM-5.3-Flash 完成上述链路：Memory 条目引用了
-ZCode Hook 采集的 Source，新会话模型输入包含 PreparedContext，并正确回答未在新问题中出现的代号。
+官方 Windows 桌面版 3.14.3 已在隔离 Scope 中完成上述链路，宿主使用 GLM-5.3，Server Generation 使用
+`openai-chat:glm-5.3-flash`。公开读回确认 Memory 引用了 ZCode Hook 采集的 Source；全新会话的 Hook
+记录显示 prepare ready、上下文已输出，用户报告回答了未在新问题中出现的准确代号。
 
 ## 验证显式写入和新会话召回
 
@@ -331,7 +333,8 @@ Hook 按 `POWERCONTEXT_ZCODE_SCOPE_ID`、当前 session binding、workspace bind
 
 PowerContext 工具未出现在会话里时，先完全退出并重启 ZCode，再查 `plugins.dirs`、插件目录和 `.mcp.json`。
 工具已出现但调用失败时，检查 MCP 结果中的 Scope、鉴权、Server URL 和 HTTP 错误；不要把模型的文字
-回答当成工具结果。`doctor zcode` 只核对声明，不会发起 `search_memory` 或 `remember_memory`。
+回答当成工具结果。`doctor zcode` 核对安装声明并执行只读连接与 Scope 探测，不会发起
+`search_memory` 或 `remember_memory`，也不检查当前 ZCode 会话的原生 MCP 工具清单。
 在 Windows 上，安装插件的目录还必须可由启动桌面版的账户读取。若另一个受限账户创建了目录，安装账户下的
 `doctor` 可能通过，但桌面版会报 `plugin_manifest_not_found`。用桌面版账户检查
 `Test-Path <插件目录>\.zcode-plugin\plugin.json`；若显示拒绝访问，请用该账户在其可读的新目录重新安装。
