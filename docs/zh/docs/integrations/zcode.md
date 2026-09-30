@@ -10,8 +10,13 @@ description: 安装 PowerContext ZCode 插件，验证自动生成 Memory、新�
 
 本集成支持[开源 ZCode CLI](https://github.com/zai-org/ZCode)。官方 Windows 桌面版 3.14.3 已用真实
 PowerContext Server 和 GLM-5.3-Flash 验证普通提示词采集、自动生成 Memory、新会话召回及 MCP Memory 读写。
-同一版本也已验证 Handoff 的准备、临时读取、提交和新会话读取，以及本地 Bearer 鉴权与断服恢复。
+同一版本也已验证 Handoff 的准备、临时读取、提交和新会话读取，以及本地 Bearer 鉴权与断服期间普通对话。
 开源 CLI 还通过 SSH 端口转发验证了跨机器 HTTPS 连接。远端端口的直接 HTTPS 接入及其他官方版本尚未验证。
+开源 CLI 0.16.9 另已在真实本地 Server 上验证普通提示词自动采集、真实模型定时生成带 Source 引用的 Memory，
+以及全新会话召回。桌面版 3.14.3 另已通过 Scope 绑定、只读状态诊断、Memory citation 冲突、
+准确 Handoff revision 的 Receipt/Outcome 关联及候选版本授权验收。
+仓库提供[可重复 CLI 验收](https://github.com/oceanbase/powercontext/tree/master/integrations/zcode/acceptance)
+与人工桌面步骤；可控模型、真实模型和桌面证据分别记录，单个场景通过不代表整套验收完成。
 
 ## 安装匹配的 Server 和插件
 
@@ -182,7 +187,9 @@ Hook 为同一 Scope、session、turn 和提示词计算稳定 Source ID。若�
 
 已测试的开源 CLI 实际发出了 startup/resume，resume 上下文进入了模型输入；执行 `/compact` 后却**没有发出**
 SessionStart compact。公开类型包含事件不等于宿主会触发。clear/compact payload 已通过本地处理测试，
-真实宿主触发仍属未支持或未验证。官方 Windows 桌面版的新生命周期行为需要独立验收。
+真实宿主触发仍属未支持或未验证。官方 Windows 桌面版 3.14.3 执行 `/compact` 后也未发出 SessionStart(compact)。
+桌面版 resume 实际发出事件，分别记录了 empty 和 ready；ready 分支输出上下文且不额外采集 Source。
+开启后的桌面 Stop 在 778ms 超时后保留 unknown 跟踪和 pause；这证明有界处理，不代表处理已完成。
 
 `boundary_flush` 默认 `false`。开启表示希望 Stop 请求 Memory 处理，可能调用 Server Generation 并产生模型费用；
 开关不配置 Generation，也不保证生成新 Memory：
@@ -288,8 +295,10 @@ node --test integrations/zcode/plugins/powercontext/tests/host.test.mjs
 
 第二条需要将 `ZCODE_CLI_BIN` 指向已构建的开源 CLI；它使用模拟模型和 Server，不能代替真实宿主验收。
 官方 Windows 桌面版 3.14.3 已分别连接本地无鉴权与 Bearer 鉴权 Server：MCP `list_scopes` 成功，
-普通提示词经 Hook 形成可读回的 Source。断服期间普通对话仍能回答；Server 恢复后，无需重启 ZCode，
-MCP 读取和 Hook 采集重新成功。Handoff 已完成 `handoff_current_work` → `continue_handoff`（prepared）→
+普通提示词经 Hook 形成可读回的 Source。断服期间普通对话仍能回答；本轮隔离验收中，Server 重启后
+同一任务的原生 MCP 调用返回 `Session not found`；新建任务后原生 MCP 恢复，无需重启程序。
+这不证明原任务恢复或自动重连。Handoff 已完成
+`handoff_current_work` → `continue_handoff`（prepared）→
 `commit_handoff` → 全新会话 `continue_handoff`（latest），提交的 revision 1 能从 Server 读回。
 其他已实测工具包括 `get_scope`、`list_memory_entries`、`capture_content_source`、
 `list_artifact_candidates` 和 `list_dream_runs`；后两者返回合法的空列表。

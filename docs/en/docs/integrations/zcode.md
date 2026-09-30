@@ -12,8 +12,13 @@ This integration supports the [open-source ZCode CLI](https://github.com/zai-org
 app version 3.14.3 has also been exercised with a live PowerContext Server and GLM-5.3-Flash:
 ordinary prompt capture, automatic Memory generation, fresh-session recall, and MCP Memory read/write worked.
 The same release also passed Handoff preparation, temporary resolution, commit, and fresh-session resolution, plus
-local Bearer authentication and recovery after a Server outage. The open-source CLI has also passed remote HTTPS
+local Bearer authentication and ordinary task continuity during a Server outage. The open-source CLI has also passed remote HTTPS
 validation through an SSH port forward. Direct HTTPS ingress and other official releases remain unverified.
+CLI 0.16.9 separately passed automatic prompt capture, live scheduled Memory generation with Source citations, and
+fresh-session recall against a real local Server. Desktop 3.14.3 separately passed Scope binding, readonly runtime
+diagnostics, Memory citation conflicts, exact-revision Receipt/Outcome association and candidate version authorization.
+The repository provides [repeatable CLI acceptance and manual desktop steps](https://github.com/oceanbase/powercontext/tree/master/integrations/zcode/acceptance).
+Controlled inference, live models and desktop execution are recorded separately; a passing scenario is not a complete run.
 
 ## Install matching Server and plugin versions
 
@@ -202,7 +207,10 @@ query does not guarantee full task recovery, and the next prompt still performs 
 The tested open-source CLI emitted `startup` and `resume`, and resume context reached the model. Running `/compact`
 in that build did **not** emit `SessionStart compact`; its public event type alone does not establish execution.
 The handler accepts clear/compact payloads in local tests, while their real-host trigger remains unsupported or
-unverified. New lifecycle behavior in the official Windows desktop app still needs separate acceptance.
+unverified. Official Windows desktop 3.14.3 also completed `/compact` without emitting `SessionStart(compact)`.
+Desktop resume emitted the actual Hook with empty and ready results; the ready case emitted context and did not capture
+an additional Source. An opt-in desktop Stop timed out after 778 ms and preserved `unknown` tracking and its pause;
+this verifies bounded handling, not successful processing.
 
 `boundary_flush` defaults to `false`. Enable it only when you want Stop to request Memory processing, which can invoke
 Server Generation and model charges. It does not configure Generation or guarantee a new Memory entry:
@@ -330,8 +338,10 @@ node --test integrations/zcode/plugins/powercontext/tests/host.test.mjs
 The second command needs `ZCODE_CLI_BIN` pointing to a built CLI. It uses a fake model and Server and does not replace
 a live-host acceptance run. Official Windows desktop 3.14.3 connected to local unauthenticated and Bearer-authenticated
 Servers: MCP `list_scopes` succeeded, and ordinary prompts became readable Sources through the Hook. An ordinary
-conversation continued during a Server outage; after recovery, MCP reads and Hook capture resumed without restarting
-ZCode. Handoff completed `handoff_current_work` → `continue_handoff` (prepared) → `commit_handoff` → fresh-session
+conversation continued during a Server outage. In the current isolated acceptance, a native MCP call in the same task
+after Server restart failed with `Session not found`. Creating a new task restored native MCP without restarting
+the app; recovery of the original task and automatic reconnection are not established. Handoff completed
+`handoff_current_work` → `continue_handoff` (prepared) → `commit_handoff` → fresh-session
 `continue_handoff` (latest), and revision 1 was read back from the Server. Other exercised tools include `get_scope`,
 `list_memory_entries`, `capture_content_source`, `list_artifact_candidates`, and `list_dream_runs`; the last two
 returned valid empty lists. A plugin installed in a fresh directory created by the Windows login user also passed

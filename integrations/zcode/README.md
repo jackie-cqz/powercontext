@@ -6,10 +6,20 @@ Install and diagnose it with `powercontext setup zcode --source /path/to/powerco
 
 See the [English guide](../../docs/en/docs/integrations/zcode.md) or [中文指南](../../docs/zh/docs/integrations/zcode.md) for Scope setup, `.env`, authentication, capture controls, remote transport, validation, and uninstall instructions.
 
-The official Windows desktop version 3.14.3 has been verified with live prompt capture, scheduled Memory generation, context injection and fresh-session recall, MCP Memory and Handoff calls, local Bearer authentication, recovery after a Server outage, and a fresh user-owned directory installation. Desktop checks used local Servers. The open-source CLI also passed real-model MCP and prompt capture against a remote HTTPS Server through SSH forwarding; direct HTTPS ingress, other official versions, and a combined automatic Generation/fresh-session CLI loop remain unverified. New Scope and runtime-observation workflows require their own host evidence.
+The official Windows desktop version 3.14.3 has been verified with live prompt capture, scheduled Memory generation, context injection and fresh-session recall, MCP Memory citation conflicts, nullable Handoff carriers, exact-revision Receipt/Outcome association, candidate version authorization, accurate Scope binding, readonly runtime diagnostics, and a fresh user-owned directory installation. Desktop checks used local Servers. The open-source CLI also passed real-model MCP and prompt capture against a remote HTTPS Server through SSH forwarding. CLI 0.16.9 has separately passed two independent controlled-model and two independent live-model core acceptance runs. Direct HTTPS ingress and other official versions remain unverified.
+
+See [repeatable CLI acceptance](acceptance/README.md) and [manual Windows desktop acceptance](acceptance/desktop.md).
+The CLI suite distinguishes controlled inference from live models and records individual scenario outcomes;
+partial runs do not establish complete acceptance.
 
 SessionStart resolves Scope; resume/compact handlers can restore readonly context. The tested open-source CLI emitted
 startup/resume; `/compact` did not emit a compact event. Stop optionally processes pending Sources with a 1000 ms budget,
 defaulting to disabled. Cursor progress, Memory creation and model reception remain separate evidence. Unknown flushes
-pause automatic retry, and runtime status exposes pending tracking. New official Windows desktop lifecycle behavior
-remains unverified; see the guides for opt-in configuration and explicit unknown-result recovery.
+pause automatic retry, and runtime status exposes pending tracking. Official Windows desktop 3.14.3 also completed
+`/compact` without a compact Hook. Desktop resume emitted its Hook and readonly context; an opt-in Stop timed out
+within budget and preserved unknown tracking. See the guides for these support limits and explicit unknown-result recovery.
+
+During a desktop Server outage, an ordinary task continued. After the Server restarted, a single native MCP call in
+the same task failed with `Session not found`; creating a new task restored native MCP without restarting the app.
+This is a manual recovery path. CLI 0.16.9 also retained
+an invalid MCP session, and closing/resuming that persisted session in the same process restored it.

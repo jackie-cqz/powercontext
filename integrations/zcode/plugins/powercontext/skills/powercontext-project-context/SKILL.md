@@ -38,6 +38,13 @@ mismatch; do not use observations as Scope authority or proof of current MCP dis
 not proof of host reception; Source acceptance is not proof of Memory generation. Interrupted/unknown writes remain
 unconfirmed. Status does not retry writes. Missing/unwritable runtime data does not stop ordinary work.
 
+```text
+node <status_script> --cwd <absolute-current-workspace> --session-id <current-session_id> --data-dir <plugin_data_dir>
+```
+
+`--cwd` is required; passing the workspace as a positional argument is invalid. Quote each path and argument for the
+actual host shell, including paths containing spaces.
+
 Boundary processing is optional and does not prove Memory or task completion. Report pending/unknown/tracking-incomplete
 states exactly. Never enable boundary flush or clear its pause to manufacture success. Only an explicit user request
 accepting an unknown flush retry authorizes the metadata's `pending_script resume-flush` control, with exact current

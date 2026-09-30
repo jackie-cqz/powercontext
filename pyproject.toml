@@ -211,6 +211,8 @@ pythonpath = ["integrations/pydantic-ai/src", "scripts"]
 markers = [
     "native_service: mutates a disposable matching-platform current-user service manager",
     "real_e2e: uses real Codex, external model providers, and the configured database",
+    "zcode_host_acceptance: uses an explicitly configured real ZCode CLI and isolated real PowerContext Server",
+    "zcode_live_model: opt-in ZCode host acceptance using live host and Generation models",
 ]
 
 [tool.ruff]
