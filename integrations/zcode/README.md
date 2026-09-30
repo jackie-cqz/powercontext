@@ -7,3 +7,9 @@ Install and diagnose it with `powercontext setup zcode --source /path/to/powerco
 See the [English guide](../../docs/en/docs/integrations/zcode.md) or [中文指南](../../docs/zh/docs/integrations/zcode.md) for Scope setup, `.env`, authentication, capture controls, remote transport, validation, and uninstall instructions.
 
 The official Windows desktop version 3.14.3 has been verified with live prompt capture, scheduled Memory generation, context injection and fresh-session recall, MCP Memory and Handoff calls, local Bearer authentication, recovery after a Server outage, and a fresh user-owned directory installation. Desktop checks used local Servers. The open-source CLI also passed real-model MCP and prompt capture against a remote HTTPS Server through SSH forwarding; direct HTTPS ingress, other official versions, and a combined automatic Generation/fresh-session CLI loop remain unverified. New Scope and runtime-observation workflows require their own host evidence.
+
+SessionStart resolves Scope; resume/compact handlers can restore readonly context. The tested open-source CLI emitted
+startup/resume; `/compact` did not emit a compact event. Stop optionally processes pending Sources with a 1000 ms budget,
+defaulting to disabled. Cursor progress, Memory creation and model reception remain separate evidence. Unknown flushes
+pause automatic retry, and runtime status exposes pending tracking. New official Windows desktop lifecycle behavior
+remains unverified; see the guides for opt-in configuration and explicit unknown-result recovery.

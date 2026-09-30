@@ -17,6 +17,7 @@
 import { isAbsolute } from 'node:path'
 import { parseArgs } from 'node:util'
 import { queryObservations } from '../shared/observations.mjs'
+import { queryPending } from '../shared/pending.mjs'
 import { sessionIdentity } from '../shared/scope.mjs'
 import { loadSettings } from '../shared/settings.mjs'
 
@@ -27,7 +28,14 @@ try {
   if (!values.cwd || !isAbsolute(values.cwd) || values.latest && values['session-id']) throw new Error('invalid_arguments')
   const input = { cwd: values.cwd, sessionId: values['session-id'] }
   if (!values.latest && !sessionIdentity(input)) throw new Error('session_required')
-  const result = await queryObservations(input, loadSettings(), values['data-dir'] ?? process.env.ZCODE_PLUGIN_DATA, values.latest)
+  const settings = loadSettings(), dataDir = values['data-dir'] ?? process.env.ZCODE_PLUGIN_DATA
+  const result = await queryObservations(input, settings, dataDir, values.latest)
+  try { result.pending = await queryPending(input, settings, dataDir, values.latest) }
+  catch (error) {
+    result.pending = { status: 'unavailable', code: ['invalid_pending', 'unsupported_pending', 'pending_capacity_exceeded']
+      .includes(error.message) ? error.message : 'pending_state_unavailable' }
+    process.exitCode = 1
+  }
   console.log(JSON.stringify(result))
   if (result.issues.length) process.exitCode = 1
 } catch (error) {

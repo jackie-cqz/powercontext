@@ -86,7 +86,7 @@ export function failureCode(error) {
     'scope_unresolved', 'invalid_arguments', 'binding_not_confirmed']
   if (localCodes.includes(message)) return message
   if (message === 'unscoped') return 'scope_unresolved'
-  if (['invalid_prepared', 'invalid_receipt', 'invalid_status', 'missing_body', 'response_too_large', 'invalid_json'].includes(message) ||
+  if (['invalid_prepared', 'invalid_receipt', 'invalid_flush', 'invalid_status', 'missing_body', 'response_too_large', 'invalid_json'].includes(message) ||
       error instanceof SyntaxError || error instanceof TypeError && message !== 'fetch failed') return 'invalid_response'
   const httpCodes = { http_401: 'unauthorized', http_403: 'forbidden', http_404: 'not_found', http_409: 'conflict', http_422: 'invalid_request', http_503: 'server_unavailable' }
   if (httpCodes[message]) return httpCodes[message]

@@ -192,6 +192,67 @@ text in one session conservatively reuses a Source ID and cannot distinguish a n
 capture is enabled by default, while text resembling a secret is not captured automatically. Preparation and capture
 are independent: one can succeed when the other fails.
 
+## Session lifecycle and optional boundary processing
+
+`SessionStart` resolves Scope and records the event. `startup`/`clear` add no generic recall or Source; the first ordinary
+prompt still performs task-related prepare. On `resume`/`compact`, the Hook can prepare up to 8000 bytes using the fixed
+query “Current project decisions, constraints, and outstanding work”. Returned history stays untrusted. This generic
+query does not guarantee full task recovery, and the next prompt still performs its own prepare.
+
+The tested open-source CLI emitted `startup` and `resume`, and resume context reached the model. Running `/compact`
+in that build did **not** emit `SessionStart compact`; its public event type alone does not establish execution.
+The handler accepts clear/compact payloads in local tests, while their real-host trigger remains unsupported or
+unverified. New lifecycle behavior in the official Windows desktop app still needs separate acceptance.
+
+`boundary_flush` defaults to `false`. Enable it only when you want Stop to request Memory processing, which can invoke
+Server Generation and model charges. It does not configure Generation or guarantee a new Memory entry:
+
+```powershell
+$env:POWERCONTEXT_ZCODE_BOUNDARY_FLUSH = 'true'
+powercontext setup zcode --source 'C:\path\to\powercontext'
+# Quit and reopen the host from this terminal, with the same endpoint/auth/CA configuration.
+```
+
+Setup saves this option; omission on upgrade preserves it. The launch environment overrides the saved value, using the
+same false aliases as capture (`0`, `false`, `no`, `off`). To disable and save it, set the variable to `false` and rerun
+setup. Omitting `--capture-prompts` also preserves the saved capture preference. Data remains in the host's plugin data
+directory when the managed installation is refreshed or the boundary switch is disabled.
+
+A valid Source receipt becomes a content-free pending record. Scope/session/profile/endpoint isolation is enforced;
+workspace fingerprints provide provenance, while a session's claim and pause cover its Scope across workspace changes.
+Before flush, Stop resolves the current Scope again. It sends at most one `POST /v1/memory/flush`, containing only
+`scope_id`; local target positions are not invented API fields. Other Scopes remain pending.
+
+Stop has a 1000 ms internal budget (800 ms for network work), with a 1500 ms host timeout. A five-second claim window
+prevents concurrent/repeated Stop sends; the last second of a window is deferred. Stop never blocks or continues the
+model turn, summarizes its answer, creates Handoff/Receipt/TaskOutcome, or retries a write within the boundary.
+It does not guarantee processing during cancellation or host exit.
+
+`status` now includes `powercontext.zcode.pending-status.v1`: receipt counts, target position, tracking problems and
+paused unknown flushes. `cursor_reached` proves only a validated processing cursor covered the selected receipt snapshot;
+read actual Memory and recall separately. A concurrent later receipt stays pending. With an idle/behind cursor, receipts
+remain. A capture whose delivery is unknown has no fabricated position and pauses affected automatic tracking.
+
+Flush uncertainty is persisted **before** the request. Timeout, disconnection, invalid response or interrupted process
+preserves the pause even after its claim expires. The public contract does not fully confirm in-flight work, so automatic
+retry remains paused; the scheduler and ordinary task can continue. After inspecting the Server and explicitly deciding
+to accept the risk of repeating an unknown flush, use the metadata's installed `pending_script`:
+
+```powershell
+node '<installed pending_script>' resume-flush --cwd (Get-Location).Path --session-id '<exact session ID>' `
+  --data-dir '<actual plugin_data_dir>' --scope-id '<current exact Scope ID>' --accept-unknown-outcome
+```
+
+This verifies the current Scope and releases only its flush pause; it sends no flush, discards no receipt, and does not
+clear an unknown capture or incomplete-tracking marker. `claim_busy` means retry this explicit control after the active
+claim window. A later enabled Stop can process the retained receipts. Do not release pauses automatically from a Skill.
+
+Pending storage is bounded to 256 receipt/tracking records, 512 directory entries and 16 KiB per record. Saturation
+preserves unconfirmed evidence, reports tracking incomplete and stops automatic flush; Source capture continues.
+A capture guard is persisted before sending, and is replaced by a receipt only after acceptance. Expired versioned claim
+files can be removed; unknown formats and unconfirmed records are retained. The query performs only local derived-state
+maintenance. Missing/unwritable storage degrades boundary tracking without blocking ordinary recall/capture.
+
 ## Scope for explicit operations and workflows
 
 The prompt Hook supplies current-request binding metadata separately from recalled history: the exact Scope, session
@@ -364,6 +425,7 @@ the Server URL. Rerun setup after enabling authentication to keep the Hook and M
 | `POWERCONTEXT_ZCODE_SCOPE_ID` | unset | Select an existing Scope before session/workspace binding and Server default. |
 | `POWERCONTEXT_ZCODE_REMOTE_WORKSPACE` | `false` | Disable local path binding for remote workspaces; requires a Scope ID. |
 | `POWERCONTEXT_ZCODE_CAPTURE_PROMPTS` | setup value, `true` by default | Override prompt capture at runtime. |
+| `POWERCONTEXT_ZCODE_BOUNDARY_FLUSH` | saved value, `false` by default | Opt into bounded Stop Memory processing; setup saves an explicit environment value. |
 | `POWERCONTEXT_ZCODE_AUTHORIZATION` | unset | Complete `Bearer <token>` header for Hook and MCP. |
 
 Setup saves the Server URL, non-loopback plaintext HTTP consent, and default capture setting in `powercontext.json`.

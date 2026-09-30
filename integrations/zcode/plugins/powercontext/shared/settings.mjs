@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -32,22 +32,29 @@ export function loadSettings() {
   const path = resolve(PLUGIN_ROOT, 'powercontext.json')
   let installed = {}
   if (existsSync(path)) {
+    let file
     try {
-      installed = JSON.parse(readFileSync(path, 'utf8'))
+      file = openSync(path, 'r')
+      const buffer = Buffer.alloc(16_385)
+      const bytes = readSync(file, buffer, 0, buffer.length, 0)
+      if (bytes > 16_384) throw new Error('invalid_settings')
+      installed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, bytes)))
       if (!installed || typeof installed.server_url !== 'string' || !installed.server_url.trim()) {
         throw new Error('invalid_settings')
       }
     } catch {
       // An unreadable installed endpoint must never redirect writes to a fallback Server.
       installed = { server_url: 'invalid' }
-    }
+    } finally { if (file !== undefined) closeSync(file) }
   }
+  const boundary = process.env.POWERCONTEXT_ZCODE_BOUNDARY_FLUSH
   const capture = process.env.POWERCONTEXT_ZCODE_CAPTURE_PROMPTS
   return {
     serverUrl: installed.server_url || process.env.POWERCONTEXT_ZCODE_SERVER_URL || 'http://127.0.0.1:8000',
     serverUrlSource: installed.server_url ? 'installed' : process.env.POWERCONTEXT_ZCODE_SERVER_URL ? 'environment' : 'default',
     allowInsecureHttp: installed.allow_insecure_http === true,
     capturePrompts: capture !== undefined ? !['0', 'false', 'no', 'off'].includes(capture.toLowerCase()) : installed.capture_prompts !== false,
+    boundaryFlush: boundary !== undefined ? !['0', 'false', 'no', 'off'].includes(boundary.toLowerCase()) : installed.boundary_flush === true,
     authorization: process.env.POWERCONTEXT_ZCODE_AUTHORIZATION,
     remoteWorkspace: enabled(process.env.POWERCONTEXT_ZCODE_REMOTE_WORKSPACE),
     explicitScopeId: nonempty(process.env.POWERCONTEXT_ZCODE_SCOPE_ID),

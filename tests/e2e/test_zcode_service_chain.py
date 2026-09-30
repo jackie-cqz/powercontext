@@ -181,10 +181,58 @@ def test_zcode_source_is_processed_and_recalled_in_a_new_session(tmp_path: Path,
             )
             assert scope_id in first["hookSpecificOutput"]["additionalContext"]
             assert "teal-731" not in first["hookSpecificOutput"]["additionalContext"]
-            flushed = client.post("/v1/memory/flush", json={"scope_id": scope_id})
-            flushed.raise_for_status()
-            assert flushed.json()["processed_source_count"] == 1
-            assert flushed.json()["memory"] is not None
+            remaining = 5 - time.time() % 5
+            if remaining < 1.5:
+                time.sleep(remaining + 0.05)
+            stopped = subprocess.run(
+                [node, str(HOOK.parent / "stop.mjs")],
+                input=json.dumps({
+                    "hookEventName": "Stop",
+                    "cwd": str(HOOK.parents[5]),
+                    "sessionId": "old-session",
+                    "stopHookActive": False,
+                }),
+                env={
+                    **environment,
+                    "POWERCONTEXT_ZCODE_SCOPE_ID": scope_id,
+                    "POWERCONTEXT_ZCODE_BOUNDARY_FLUSH": "true",
+                },
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=2,
+            )
+            assert stopped.returncode == 0, stopped.stderr
+            assert json.loads(stopped.stdout) == {}
+            status = subprocess.run(
+                [
+                    node,
+                    str(HOOK.parent.parent / "scripts/status.mjs"),
+                    "--cwd",
+                    str(HOOK.parents[5]),
+                    "--session-id",
+                    "old-session",
+                ],
+                env={
+                    **environment,
+                    "POWERCONTEXT_ZCODE_SCOPE_ID": scope_id,
+                    "POWERCONTEXT_ZCODE_BOUNDARY_FLUSH": "true",
+                },
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=10,
+            )
+            assert status.returncode == 0, status.stdout + status.stderr
+            result = json.loads(status.stdout)
+            assert result["observation"]["stages"]["flush"]["state"] == "cursor_reached"
+            assert result["pending"]["scopes"] == []
+            entries = client.post("/v1/memory/entries/list", json={"scope_id": scope_id})
+            entries.raise_for_status()
+            assert entries.json()["memory"] is not None
+            generated = next(entry for entry in entries.json()["entries"] if "teal-731" in entry["text"])
+            captured = client.get(f"/v1/scopes/{scope_id}/sources").json()["items"]
+            assert generated["source_refs"] == [{"name": "content", "source_id": captured[0]["source_id"]}]
 
             second = _invoke_hook(
                 node=node,

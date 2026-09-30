@@ -168,13 +168,20 @@ def preserve_zcode_installation() -> Iterator[None]:
             raise
 
 
+def saved_zcode_capture_prompts() -> bool:
+    """Keep an installed capture preference when setup has no explicit override."""
+
+    return _read_config(zcode_plugin_dir() / "powercontext.json").get("capture_prompts") is not False
+
+
 def install_zcode_plugin(  # noqa: C901 - stages and rolls back two user-owned destinations.
     *,
     source: str,
     ref: str,
     server_url: str = DEFAULT_SERVER_URL,
     allow_insecure_http: bool = False,
-    capture_prompts: bool = True,
+    capture_prompts: bool | None = None,
+    boundary_flush: bool | None = None,
 ) -> ZCodeSetupResult:
     """Install a managed plugin copy and register it without replacing other ZCode settings."""
 
@@ -192,6 +199,16 @@ def install_zcode_plugin(  # noqa: C901 - stages and rolls back two user-owned d
     config = _read_config(config_path)
     if destination.exists() and not (destination / OWNER_MARKER).is_file():
         raise SetupError(f"ZCode plugin path {destination} already exists and is not owned by PowerContext")  # noqa: TRY003
+    previous = _read_config(destination / "powercontext.json")
+    if capture_prompts is None:
+        capture_prompts = previous.get("capture_prompts") is not False
+    if boundary_flush is None:
+        boundary = (setup_environment() | dict(os.environ)).get("POWERCONTEXT_ZCODE_BOUNDARY_FLUSH")
+        boundary_flush = (
+            boundary.lower() not in {"0", "false", "no", "off"}
+            if boundary is not None
+            else previous.get("boundary_flush") is True
+        )
     plugins = config.setdefault("plugins", {})
     dirs = plugins.setdefault("dirs", [])
     if str(destination) not in dirs:
@@ -219,6 +236,7 @@ def install_zcode_plugin(  # noqa: C901 - stages and rolls back two user-owned d
                     "server_url": endpoint,
                     "allow_insecure_http": allow_insecure_http,
                     "capture_prompts": capture_prompts,
+                    "boundary_flush": boundary_flush,
                 },
             )
             mcp_path = staged / ".mcp.json"
@@ -269,13 +287,19 @@ def _check_zcode_modules(destination: Path) -> Diagnostic:
     hook = destination / "hooks" / "user_prompt_submit.mjs"
     modules = [
         hook,
-        *(destination / "shared" / name for name in ("settings.mjs", "transport.mjs", "scope.mjs", "observations.mjs")),
-        *(destination / "scripts" / name for name in ("scope.mjs", "status.mjs", "doctor.mjs")),
+        *(destination / "hooks" / name for name in ("session_start.mjs", "stop.mjs")),
+        *(
+            destination / "shared" / name
+            for name in ("settings.mjs", "transport.mjs", "scope.mjs", "observations.mjs", "context.mjs", "pending.mjs")
+        ),
+        *(destination / "scripts" / name for name in ("scope.mjs", "status.mjs", "doctor.mjs", "pending.mjs")),
     ]
     hooks_file = destination / "hooks" / "hooks.json"
     try:
         declared = json.loads(hooks_file.read_text(encoding="utf-8"))
-        hook_ok = all(module.is_file() for module in modules) and bool(declared["hooks"]["UserPromptSubmit"])
+        hook_ok = all(module.is_file() for module in modules) and all(
+            declared["hooks"][name] for name in ("UserPromptSubmit", "SessionStart", "Stop")
+        )
     except (OSError, ValueError, KeyError, TypeError):
         hook_ok = False
     node = which("node")

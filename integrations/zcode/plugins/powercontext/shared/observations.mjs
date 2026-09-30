@@ -95,7 +95,9 @@ function validateRecord(record) {
     scope_id: typeof record.scope_id === 'string' && /^[A-Za-z0-9:_-]{1,256}$/u.test(record.scope_id) ? record.scope_id : null,
     config: { server_url: endpoint, server_url_source: config.server_url_source, capture_prompts: config.capture_prompts,
       allow_insecure_http: config.allow_insecure_http === true, authorization_configured: config.authorization_configured,
-      hook_budget_ms: HOOK_BUDGET_MS, request_timeout_ms: REQUEST_TIMEOUT_MS },
+      boundary_flush: config.boundary_flush === true,
+      hook_budget_ms: record.event === 'Stop' ? 1000 : HOOK_BUDGET_MS,
+      request_timeout_ms: record.event === 'Stop' ? 800 : REQUEST_TIMEOUT_MS },
     stages,
   }
 }
@@ -170,7 +172,9 @@ export async function startObservation(input, settings, keys, dataDir = process.
     started_at: Date.now(), completed_at: null, identity, scope_id: null,
     config: { server_url: serverOrigin(settings), server_url_source: settings.serverUrlSource,
       capture_prompts: settings.capturePrompts, authorization_configured: Boolean(settings.authorization),
-      allow_insecure_http: settings.allowInsecureHttp, hook_budget_ms: HOOK_BUDGET_MS, request_timeout_ms: REQUEST_TIMEOUT_MS },
+      allow_insecure_http: settings.allowInsecureHttp, boundary_flush: settings.boundaryFlush === true,
+      hook_budget_ms: (input.hookEventName ?? input.hook_event_name) === 'Stop' ? 1000 : HOOK_BUDGET_MS,
+      request_timeout_ms: (input.hookEventName ?? input.hook_event_name) === 'Stop' ? 800 : REQUEST_TIMEOUT_MS },
     stages: Object.fromEntries(STAGES.map(stage => [stage, stageResult('not_observed')])),
   }
   await atomicJson(path, record)
@@ -191,6 +195,7 @@ export async function queryObservations(input, settings, dataDir, latest = false
   let match = entries.find(({ record }) => ['endpoint', 'profile', 'workspace', ...(latest ? [] : ['session'])]
     .every(name => record.identity[name] === identity[name]))?.record
   let mismatch = Boolean(match && (match.config.capture_prompts !== settings.capturePrompts ||
+    match.config.boundary_flush !== (settings.boundaryFlush === true) ||
     match.config.authorization_configured !== Boolean(settings.authorization) ||
     settings.explicitScopeId && match.scope_id && match.scope_id !== settings.explicitScopeId))
   if (!match) {

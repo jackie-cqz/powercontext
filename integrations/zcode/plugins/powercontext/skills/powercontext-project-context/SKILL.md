@@ -37,3 +37,9 @@ session identity. `--latest` explicitly queries workspace history. Explain each 
 mismatch; do not use observations as Scope authority or proof of current MCP discovery. A locally emitted context is
 not proof of host reception; Source acceptance is not proof of Memory generation. Interrupted/unknown writes remain
 unconfirmed. Status does not retry writes. Missing/unwritable runtime data does not stop ordinary work.
+
+Boundary processing is optional and does not prove Memory or task completion. Report pending/unknown/tracking-incomplete
+states exactly. Never enable boundary flush or clear its pause to manufacture success. Only an explicit user request
+accepting an unknown flush retry authorizes the metadata's `pending_script resume-flush` control, with exact current
+Scope/session/data and `--accept-unknown-outcome`. It releases a local pause only; a later Stop may process receipts.
+Do not clear tracking guards or capacity markers automatically. Stop never creates Handoff, Receipt or TaskOutcome.

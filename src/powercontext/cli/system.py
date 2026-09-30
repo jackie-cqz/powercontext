@@ -631,7 +631,12 @@ def setup_zcode(
     server_url: Annotated[
         str | None, typer.Option(help="PowerContext Server URL; resolves environment and saved settings.")
     ] = None,
-    capture_prompts: Annotated[bool, typer.Option(help="Capture ZCode prompts as Source evidence.")] = True,
+    capture_prompts: Annotated[
+        bool | None,
+        typer.Option(
+            "--capture-prompts/--no-capture-prompts", help="Capture prompts; omission preserves saved preference."
+        ),
+    ] = None,
     allow_insecure_http: Annotated[
         bool | None,
         typer.Option("--allow-insecure-http/--no-allow-insecure-http", help="Allow unencrypted remote HTTP."),
@@ -640,7 +645,7 @@ def setup_zcode(
 ) -> None:
     """Install the ZCode CLI or Windows desktop plugin."""
 
-    from powercontext.cli.zcode import preserve_zcode_installation, run_zcode_diagnostics
+    from powercontext.cli.zcode import preserve_zcode_installation, run_zcode_diagnostics, saved_zcode_capture_prompts
 
     try:
         with preserve_zcode_installation():
@@ -649,7 +654,7 @@ def setup_zcode(
                 source=source,
                 ref=ref,
                 server_url=server_url,
-                capture_prompts=capture_prompts,
+                capture_prompts=capture_prompts if capture_prompts is not None else saved_zcode_capture_prompts(),
                 allow_insecure_http=allow_insecure_http,
                 json_output=json_output,
             ).result

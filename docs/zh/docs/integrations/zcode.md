@@ -174,6 +174,57 @@ Hook 为同一 Scope、session、turn 和提示词计算稳定 Source ID。若�
 重复的相同文本会保守地复用 Source ID，无法区分独立提交和重试。默认采集提示词；疑似包含密钥的
 文本不会自动采集。准备上下文与采集相互独立：前者失败后仍可能采集，后者失败也不会丢弃已准备的上下文。
 
+## 会话生命周期与可选边界处理
+
+`SessionStart` 解析 Scope 并记录事件。`startup`/`clear` 不额外泛化召回或采集 Source，首条普通提示词仍进行任务相关 prepare。
+`resume`/`compact` 可用固定查询“Current project decisions, constraints, and outstanding work”准备最多 8000 字节上下文。
+历史仍不可信；泛化查询不保证完整恢复任务，也不会取消下一条提示词的 prepare。
+
+已测试的开源 CLI 实际发出了 startup/resume，resume 上下文进入了模型输入；执行 `/compact` 后却**没有发出**
+SessionStart compact。公开类型包含事件不等于宿主会触发。clear/compact payload 已通过本地处理测试，
+真实宿主触发仍属未支持或未验证。官方 Windows 桌面版的新生命周期行为需要独立验收。
+
+`boundary_flush` 默认 `false`。开启表示希望 Stop 请求 Memory 处理，可能调用 Server Generation 并产生模型费用；
+开关不配置 Generation，也不保证生成新 Memory：
+
+```powershell
+$env:POWERCONTEXT_ZCODE_BOUNDARY_FLUSH = 'true'
+powercontext setup zcode --source 'C:\path\to\powercontext'
+# 完全退出宿主，再从同一终端启动；保留匹配的 endpoint、鉴权与 CA 配置。
+```
+
+Setup 保存该选项，升级时省略设置会保留原值。启动环境优先于保存值，false 别名与 capture 相同：`0`、`false`、`no`、`off`。
+要关闭并保存，设置为 `false` 后重新 setup。省略 `--capture-prompts` 也会保留已保存的采集偏好。
+刷新受管理插件副本或关闭边界开关不会删除宿主 data 中的 pending。
+
+有效 Source receipt 保存为无正文 pending，按 Scope/session/profile/endpoint 隔离。workspace fingerprint 记录来源，
+同 session 的 claim/pause 在工作区变化后仍覆盖相同 Scope。Stop 再解析当前 Scope，每次最多调用一次
+`POST /v1/memory/flush`，请求只包含 `scope_id`；本地目标 position 不变成虚构的 API 字段。其他 Scope 保留 pending。
+
+Stop 内部总预算 1000ms，网络使用前 800ms，宿主 timeout 为 1500ms。五秒 claim 窗口阻止并发/重复发送，窗口最后一秒延后处理。
+Stop 不阻断或续跑模型，不总结回答，不创建 Handoff/Receipt/TaskOutcome，也不在本次边界重试写入。
+取消或宿主退出时不保证处理完成。
+
+`status` 增加 `powercontext.zcode.pending-status.v1`，显示 receipt 数量、目标 position、tracking 问题和未知 flush 暂停。
+`cursor_reached` 仅证明合法处理 cursor 覆盖本次选中 receipt 快照；Memory 与实际召回须单独回读。
+并发新增的更大 position 保留；idle/未追平时也保留。未知 capture 不伪造 position，并暂停受影响 Scope 的自动跟踪处理。
+
+发出 flush **之前**先保存不确定性。超时、断连、无效响应或进程中止都会保留 pause，claim 过期不会解除它。
+当前公共契约无法完整确认在途工作，因此不自动重试；scheduler 和普通任务可以继续。
+检查 Server 后，用户明确接受重复未知 flush 的风险时，使用本轮元数据中的 `pending_script`：
+
+```powershell
+node '<已安装的 pending_script>' resume-flush --cwd (Get-Location).Path --session-id '<精确 session ID>' `
+  --data-dir '<实际 plugin_data_dir>' --scope-id '<当前精确 Scope ID>' --accept-unknown-outcome
+```
+
+该命令核对当前 Scope，仅解除对应 flush pause，不发 flush、不丢弃 receipt，也不清未知 capture 或 tracking-incomplete 标记。
+`claim_busy` 表示等待当前 claim 窗口后再执行这项已授权控制；后续开启的 Stop 才能处理保留的 receipt。Skill 不自动解除暂停。
+
+Pending 最多 256 条 receipt/tracking、512 个目录项，单条读取最多 16 KiB。达到上限时保留未确认记录、报告 tracking incomplete，
+停止自动 flush；Source capture 仍继续。采集前保存 guard，接受后才能转换成 receipt。过期的已知版本 claim 文件可清理，
+未知格式和未确认记录保留。查询只维护本地派生状态；data 缺失或不可写使边界跟踪降级，不阻断普通 recall/capture。
+
 ## 主动操作的 Scope 与工作流
 
 普通提示词 Hook 会提供本轮的 Scope、session 和已安装 Scope 脚本路径，另行标记为 current-request binding metadata。
@@ -323,6 +374,7 @@ Server 的鉴权与访问控制设置见[部署认证](../operate/deploy-server.
 | `POWERCONTEXT_ZCODE_SCOPE_ID` | 未设置 | 在 session/workspace binding 与默认 Scope 前显式选择已有 Scope。 |
 | `POWERCONTEXT_ZCODE_REMOTE_WORKSPACE` | `false` | 远程工作区禁用本地路径 binding；需同时设置 Scope ID。 |
 | `POWERCONTEXT_ZCODE_CAPTURE_PROMPTS` | 安装时设置，默认 `true` | 在运行时覆盖提示词采集开关。 |
+| `POWERCONTEXT_ZCODE_BOUNDARY_FLUSH` | 保存值，默认 `false` | 开启有预算的 Stop Memory 处理；setup 保存显式环境值。 |
 | `POWERCONTEXT_ZCODE_AUTHORIZATION` | 未设置 | Hook 与 MCP 使用的完整 `Bearer <token>` header。 |
 
 Server URL、非环回明文 HTTP 同意和默认采集设置由 `setup zcode` 保存到插件的 `powercontext.json`。
