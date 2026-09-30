@@ -92,7 +92,7 @@ Server 使用其他地址时，重新运行 `powercontext setup zcode --server-u
 启动 ZCode 的进程提供完整的 `POWERCONTEXT_ZCODE_AUTHORIZATION`，如下一节所示。
 验收时分别检查无凭据请求被拒绝、ZCode MCP 工具成功，以及普通提示词在同一远程 Scope 中形成 Source。
 开源 CLI 已通过 SSH 端口转发在跨机器 HTTPS 环境完成这些检查。使用私有 CA 时，给 ZCode 进程设置
-`NODE_EXTRA_CA_CERTS`，给 Python 诊断进程设置 `SSL_CERT_FILE`，均指向该 CA 证书；保持证书验证开启。
+`NODE_EXTRA_CA_CERTS`，Node doctor probe 也读取这个变量；Python API 核验可使用 `SSL_CERT_FILE`。均指向该 CA 证书，保持证书验证开启。
 该隧道验收不能证明远端监听端口可被客户端直接通过 HTTPS 访问。
 
 启动 ZCode 前准备一个已有 Scope：使用 Server 默认 Scope，或为 ZCode workspace/session 建立持久 binding；
@@ -111,7 +111,7 @@ PowerContext 授权变量必须在启动 ZCode 时可用。不要把密钥写进
 powercontext doctor zcode --json
 ```
 
-该命令分别检查 ZCode CLI 或 Windows 桌面版、插件注册、Hook 文件及 Node 语法、MCP 声明、Server readiness。
+该命令分别检查 ZCode CLI 或 Windows 桌面版、插件注册、Hook 文件及 Node 语法、MCP 声明、Server readiness、受保护 API 与 Scope 解析。
 `ok: true` 只证明这些静态和只读检查通过，不证明已运行的 ZCode 进程加载了新配置，也不证明 Scope
 解析、上下文注入或 MCP 操作已经发生。完全退出并重启 ZCode，再在新会话里检查 PowerContext 工具是否出现。
 
@@ -122,6 +122,40 @@ powercontext doctor zcode --json
 | `hooks` | 检查 `node --version`、`hooks/hooks.json` 和 `hooks/user_prompt_submit.mjs`。 |
 | `mcp` | 检查安装后的 `.mcp.json` 与 `powercontext.json` 是否指向同一 Server，鉴权占位符是否匹配。 |
 | `server` | 启动 Server，核对监听地址及 `/health/ready`；这个检查不执行 Memory 读写。 |
+| `protected_api` / `scope_probe` | 检查启动诊断进程的鉴权、CA、Scope 权限与显式 Scope；不要关闭证书校验。 |
+| `runtime` | 检查实际 data 路径、时间、配置一致性与各阶段；缺失记录不表示当前宿主加载成功。 |
+
+## 查询 Hook 运行观察
+
+Hook 将无正文的观察写入宿主提供的 `ZCODE_PLUGIN_DATA/runtime`。本轮绑定元数据包含 `status_script` 和
+`plugin_data_dir`，请使用实际值；普通模型工具不保证继承 Hook 专用环境变量。外部 PowerShell 示例：
+
+```powershell
+node '<已安装的 status_script>' --cwd (Get-Location).Path --session-id '<精确 session ID>' --data-dir '<实际 plugin_data_dir>'
+# 当前工作区的最近历史，不代表当前窗口：
+node '<已安装的 status_script>' --cwd (Get-Location).Path --latest --data-dir '<实际 plugin_data_dir>'
+powercontext doctor zcode --runtime-data-dir '<实际 plugin_data_dir>' --prepare --json
+```
+
+`powercontext.zcode.runtime-status.v1` 区分 `observed`、`not_observed`、`configuration_mismatch` 和 `invalid_state`。
+未观察到记录是合法查询结果；参数错误、存储问题或损坏记录退出非零。`--latest` 查询工作区历史，不能冒充当前会话。
+匹配记录分别显示 Scope、时间、prepare、capture 和 context output。超过五分钟标 `stale`；中断尝试标 `incomplete`，
+二者都不证明当前运行状态。写请求发出后无法确认结果时保留 `unknown`。
+
+`emitted` 只表示 Hook 本地写出了 additionalContext JSON；宿主或模型实际接收仍须查输入证据。
+`accepted` 要求匹配的 Source receipt，不证明 Memory 已生成。关闭采集、敏感内容、超长 Source 和 Scope 未解析
+分别给出原因；prepare 失败不会覆盖 capture 成功。
+
+Doctor 使用执行诊断进程的 endpoint、CA 和鉴权配置。`--prepare` 用固定查询执行只读 prepare，不采集 Source 或写 Handoff。
+readiness 成功但受保护 API 返回 401/403 时，独立报告访问失败。`mcp: configured` 是安装声明；
+`mcp_session: not_observed` 不声称当前宿主已加载工具。缺失、过期或未完成的可选历史不会使其他成功的安装/连接检查失败，
+报告中仍保留 skipped。当前探测成功也不会把历史阶段失败改成成功。
+
+记录不包含提示词、召回正文、模型回答、原始 session/路径或凭据。endpoint/profile/session/workspace fingerprint
+用于本地隔离，不是权限控制。每次尝试使用独立原子文件，按开始时间选最近记录，旧请求晚完成不会覆盖新请求。
+查询或容量维护保留 64 条已完成记录，保留未完成尝试；最多枚举 256 个观察文件或 512 个目录项，超过后报告容量问题，
+包括遗留临时文件。单条读取上限 64 KiB。data 缺失或不可写仅使观察降级，正常 prepare/capture 继续。
+清理不会删除未知格式或其他文件；重试诊断前检查目录权限和存储容量。
 
 ## 查看自动执行的证据
 

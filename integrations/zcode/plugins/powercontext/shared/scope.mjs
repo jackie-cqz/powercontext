@@ -57,9 +57,8 @@ export function bindingKeys(input, settings) {
   return keys
 }
 
-export async function resolveScope(input, settings, budgetSignal) {
+export async function resolveScope(input, settings, budgetSignal, keys = bindingKeys(input, settings)) {
   if (settings.remoteWorkspace && !settings.explicitScopeId) throw new Error('scope_unresolved')
-  const keys = bindingKeys(input, settings)
   const result = await request(settings, 'POST', '/v1/scope-bindings/resolve', {
     explicit_scope_id: settings.explicitScopeId ?? null, binding_keys: keys,
   }, budgetSignal)

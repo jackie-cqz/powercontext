@@ -28,3 +28,12 @@ including null fields. A Skill grants no execution authority; keep current user 
 Inspect real results before reporting saved, committed, accepted or approved. Empty, rejected, denied, unavailable and
 unknown are different outcomes. A timed-out write may have succeeded: inspect supported status before retrying.
 Do not save secrets, guess Scope IDs, change bindings to find history, or automatically approve candidate instructions.
+
+## Runtime diagnostics
+
+For a request to inspect PowerContext status, run the current-request metadata's `status_script` with the real cwd,
+`--session-id` and `--data-dir` from `plugin_data_dir`. Missing metadata is unavailable, not permission to guess paths or
+session identity. `--latest` explicitly queries workspace history. Explain each actual stage, age and configuration
+mismatch; do not use observations as Scope authority or proof of current MCP discovery. A locally emitted context is
+not proof of host reception; Source acceptance is not proof of Memory generation. Interrupted/unknown writes remain
+unconfirmed. Status does not retry writes. Missing/unwritable runtime data does not stop ordinary work.

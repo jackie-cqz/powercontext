@@ -101,7 +101,8 @@ then install the plugin with that `https://host` URL. Configure the Server ident
 `POWERCONTEXT_ZCODE_AUTHORIZATION` value described below. Acceptance should check that an unauthenticated request is
 rejected, a ZCode MCP tool succeeds, and an ordinary prompt becomes a Source in the same remote Scope. This integration
 has been tested across machines over HTTPS through an SSH port forward. When using a private CA, provide its certificate
-to the ZCode process through `NODE_EXTRA_CA_CERTS` and to Python diagnostics through `SSL_CERT_FILE`. Keep certificate
+to the ZCode process and Node-based doctor probe through `NODE_EXTRA_CA_CERTS`. Python API verification can use
+`SSL_CERT_FILE`. Keep certificate
 verification enabled. This tunnel test does not establish direct HTTPS reachability of the remote listener.
 
 Prepare an existing Scope before launching ZCode: use the Server default, a persistent ZCode workspace/session binding,
@@ -121,7 +122,7 @@ powercontext doctor zcode --json
 ```
 
 This checks CLI or Windows desktop discovery, plugin registration, Hook files and Node syntax, MCP declaration, and
-Server readiness independently. `ok: true` proves those static and read-only checks, not that an already running
+Server readiness, protected API access and Scope resolution independently. `ok: true` proves those static and read-only checks, not that an already running
 ZCode process loaded the latest plugin or performed Scope resolution, injection, or an MCP call. Fully restart ZCode
 and check for PowerContext tools in a new session.
 
@@ -132,6 +133,45 @@ and check for PowerContext tools in a new session.
 | `hooks` | `node --version`, `hooks/hooks.json`, and `hooks/user_prompt_submit.mjs`. |
 | `mcp` | The installed `.mcp.json` and `powercontext.json` selecting one Server, with matching authorization settings. |
 | `server` | The Server listener and `/health/ready`; this check performs no Memory operation. |
+| `protected_api` / `scope_probe` | The invoking process's authorization, CA, Scope access and explicit Scope; keep certificate verification enabled. |
+| `runtime` | Actual data path, timestamp, configuration match and stages; absent history does not prove host discovery. |
+
+## Query Hook observations
+
+The Hook writes content-free observations to the host-provided `ZCODE_PLUGIN_DATA/runtime`. Current-request binding
+metadata includes `status_script` and `plugin_data_dir`; use those actual values. Ordinary model tools need not inherit
+Hook-only variables. For an external PowerShell terminal:
+
+```powershell
+node '<installed status_script>' --cwd (Get-Location).Path --session-id '<exact session ID>' --data-dir '<actual plugin_data_dir>'
+# Latest history for this workspace, independent of the current window:
+node '<installed status_script>' --cwd (Get-Location).Path --latest --data-dir '<actual plugin_data_dir>'
+powercontext doctor zcode --runtime-data-dir '<actual plugin_data_dir>' --prepare --json
+```
+
+`powercontext.zcode.runtime-status.v1` distinguishes `observed`, `not_observed`, `configuration_mismatch` and
+`invalid_state`. Missing observations are valid query results; invalid arguments, storage problems or invalid records
+exit nonzero. `--latest` means workspace history, not the current session. A matching record reports Scope, timestamps
+and separate prepare/capture/context-output results. Records older than five minutes are `stale`; interrupted attempts
+are `incomplete`. Neither establishes the current runtime state. Unknown delivery of a write remains `unknown`.
+
+`emitted` means the Hook wrote its additionalContext JSON locally; inspect actual host/model input to prove reception.
+`accepted` requires a matching Source receipt; it does not prove Memory generation. Disabled capture, sensitive content,
+long Sources and unresolved Scope have separate reasons. Prepare failure does not overwrite capture success.
+
+Doctor probes use the invoking process's endpoint, CA and authorization configuration. `--prepare` performs a fixed-query
+readonly prepare, with no Source or Handoff write. A ready listener with a protected API returning 401/403 reports the
+access failure separately. `mcp: configured` describes installation; `mcp_session: not_observed` does not claim live
+host discovery. Missing/stale/incomplete optional history does not fail otherwise successful installation/connectivity
+checks; it remains explicitly skipped. Historical stage failures remain visible even when current probes succeed.
+
+Observations omit prompt, returned history, model answer, raw session/path and credentials. Endpoint/profile/session/
+workspace fingerprints isolate records locally; they are not an access-control mechanism. Each attempt has its own
+atomic file and latest selection uses start time, so late completion cannot replace a newer attempt. Query or saturation
+maintenance retains 64 completed records; incomplete records remain. Enumeration stops at 256 owned records or 512
+directory entries and reports capacity trouble, including undeleted temporaries. Each record read is limited to 64 KiB.
+Missing/unwritable data storage degrades observation only; ordinary prepare/capture continues. Cleanup never deletes
+unknown formats or unrelated files. Inspect filesystem permissions and storage capacity before retrying diagnostics.
 
 ## Inspect evidence from an automatic turn
 

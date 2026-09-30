@@ -657,8 +657,14 @@ def setup_zcode(
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
     diagnostics = run_zcode_diagnostics()
-    if not _diagnostics_ok(diagnostics):
-        _write_diagnostics(diagnostics, json_output=json_output)
+    required = {
+        name: item
+        for name, item in diagnostics.items()
+        if not (name in {"runtime", "mcp_session"} and item.status is DiagnosticStatus.SKIPPED)
+    }
+    status = _diagnostics_status(required)
+    if status is not DiagnosticStatus.OK:
+        _write_diagnostics(diagnostics, json_output=json_output, summary_status=status)
         raise typer.Exit(code=1)
     if json_output:
         typer.echo(json.dumps(asdict(result), indent=2))
@@ -1079,15 +1085,27 @@ def doctor_dsh(
 @doctor_app.command("zcode")
 def doctor_zcode(
     json_output: Annotated[bool, typer.Option("--json", help="Write the result as JSON.")] = False,
+    runtime_data_dir: Annotated[
+        Path | None, typer.Option("--runtime-data-dir", help="Actual ZCode plugin data directory.")
+    ] = None,
+    prepare: Annotated[bool, typer.Option("--prepare", help="Probe readonly context preparation.")] = False,
 ) -> None:
     """Check ZCode plugin registration, Hook, MCP, and Server readiness."""
 
     from powercontext.cli.zcode import run_zcode_diagnostics
 
-    diagnostics = run_zcode_diagnostics()
+    diagnostics = run_zcode_diagnostics(runtime_data_dir=runtime_data_dir, prepare=prepare)
     add_transport_diagnostic(diagnostics, "zcode")
-    _write_diagnostics(diagnostics, json_output=json_output)
-    if not _diagnostics_ok(diagnostics):
+    # Unobserved optional history is not a failed connectivity probe. Preserve its
+    # skipped status in the report rather than claiming the session was observed.
+    required = {
+        name: item
+        for name, item in diagnostics.items()
+        if not (name in {"runtime", "mcp_session"} and item.status is DiagnosticStatus.SKIPPED)
+    }
+    status = _diagnostics_status(required)
+    _write_diagnostics(diagnostics, json_output=json_output, summary_status=status)
+    if status is not DiagnosticStatus.OK:
         raise typer.Exit(code=1)
 
 
@@ -2111,9 +2129,11 @@ def _diagnostics_status(diagnostics: dict[str, Diagnostic]) -> DiagnosticStatus:
     return DiagnosticStatus.OK
 
 
-def _write_diagnostics(diagnostics: dict[str, Diagnostic], *, json_output: bool) -> None:
+def _write_diagnostics(
+    diagnostics: dict[str, Diagnostic], *, json_output: bool, summary_status: DiagnosticStatus | None = None
+) -> None:
     if json_output:
-        status = _diagnostics_status(diagnostics)
+        status = summary_status if summary_status is not None else _diagnostics_status(diagnostics)
         typer.echo(
             json.dumps(
                 {

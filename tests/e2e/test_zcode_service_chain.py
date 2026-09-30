@@ -54,7 +54,7 @@ def _invoke_hook(
     environment = dict(os.environ)
     environment.pop("POWERCONTEXT_ZCODE_SCOPE_ID", None)
     environment.pop("ZCODE_SESSION_ID", None)
-    environment.update(POWERCONTEXT_ZCODE_SERVER_URL=base_url)
+    environment.update(POWERCONTEXT_ZCODE_SERVER_URL=base_url, ZCODE_PLUGIN_DATA=os.environ["ZCODE_PLUGIN_DATA"])
     if scope_id is not None:
         environment["POWERCONTEXT_ZCODE_SCOPE_ID"] = scope_id
     result = subprocess.run(
@@ -77,7 +77,8 @@ def _invoke_hook(
     return json.loads(result.stdout)
 
 
-def test_zcode_source_is_processed_and_recalled_in_a_new_session(tmp_path: Path) -> None:
+def test_zcode_source_is_processed_and_recalled_in_a_new_session(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("ZCODE_PLUGIN_DATA", str(tmp_path / "plugin-data"))
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node.js is required for the ZCode Hook")
@@ -194,6 +195,30 @@ def test_zcode_source_is_processed_and_recalled_in_a_new_session(tmp_path: Path)
                 prompt="What is the staging deployment color?",
             )
             assert "teal-731" in second["hookSpecificOutput"]["additionalContext"]
+            status = subprocess.run(
+                [
+                    node,
+                    str(HOOK.parent.parent / "scripts/status.mjs"),
+                    "--cwd",
+                    str(HOOK.parents[5]),
+                    "--session-id",
+                    "new-session",
+                ],
+                env={**environment, "POWERCONTEXT_ZCODE_SCOPE_ID": scope_id},
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=10,
+            )
+            assert status.returncode == 0, status.stderr + status.stdout
+            observation = json.loads(status.stdout)["observation"]
+            assert observation["scope_id"] == scope_id
+            assert observation["stages"]["prepare"]["state"] == "ready"
+            assert observation["stages"]["capture"]["state"] == "accepted"
+            accepted_position = observation["stages"]["capture"]["source_position"]
+            persisted = client.get(f"/v1/scopes/{scope_id}/sources").json()["items"]
+            assert any(source["position"] == accepted_position for source in persisted)
+            assert "teal-731" not in status.stdout
             _invoke_hook(
                 node=node,
                 base_url=base_url,

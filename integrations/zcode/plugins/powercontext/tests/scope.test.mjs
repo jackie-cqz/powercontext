@@ -88,7 +88,7 @@ test('installed Scope resolver agrees with Hook and keeps binding writes distinc
     assert.equal(bound.body.scope_id, 'session-scope')
     assert.equal(bound.body.bound_scope_is_current, false)
     const resolvedRequest = seen.at(-1).body
-    const hooked = await run(join(installed, 'hooks', 'user_prompt_submit.mjs'), [], {}, {
+    const hooked = await run(join(installed, 'hooks', 'user_prompt_submit.mjs'), [], { ZCODE_PLUGIN_DATA: join(root, 'data') }, {
       hookEventName: 'UserPromptSubmit', cwd, sessionId: 'session-one', prompt: 'Look up the project.' })
     const context = JSON.parse(hooked.stdout).hookSpecificOutput.additionalContext
     const metadata = JSON.parse(context.split('\n')[1])

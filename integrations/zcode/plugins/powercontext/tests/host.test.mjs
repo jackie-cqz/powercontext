@@ -15,13 +15,14 @@
  */
 
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { createServer } from 'node:http'
 import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
+import { promisify } from 'node:util'
 
 const cli = process.env.ZCODE_CLI_BIN
 const pluginRoot = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -78,7 +79,7 @@ test('open-source ZCode CLI injects context, discovers MCP tools and survives Se
       }))
     } else if (request.url === '/v1/sources/content') {
       response.statusCode = 202
-      response.end(JSON.stringify({ status: 'accepted', source: { source_id: body.source_id }, position: 1 }))
+      response.end(JSON.stringify({ status: 'accepted', source: { name: 'content', source_id: body.source_id }, position: 1 }))
     } else if (request.url === '/mcp') {
       const result = body.method === 'initialize'
         ? { protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'powercontext-test', version: '0.1.0' } }
@@ -148,6 +149,25 @@ test('open-source ZCode CLI injects context, discovers MCP tools and survives Se
       .every(request => request.authorization === 'Bearer test-only'))
     assert.match(JSON.stringify(modelRequests[0].messages), /ultramarine/)
     assert.match(JSON.stringify(modelRequests[0].tools), /mcp__plugin_powercontext_powercontext__search_memory/)
+
+    function strings(value) {
+      return typeof value === 'string' ? [value] : value && typeof value === 'object'
+        ? Object.values(value).flatMap(strings) : []
+    }
+    const delivered = strings(modelRequests[0].messages).find(value => value.includes('PowerContext current-request binding metadata:'))
+    const binding = JSON.parse(delivered.split('\n').find(line => line.startsWith('{"schema":"powercontext.zcode.request-binding.v1"')))
+    assert.ok(binding.plugin_data_dir)
+    assert.ok(binding.session_id)
+    const status = await promisify(execFile)(process.execPath, [binding.status_script, '--cwd', workspace,
+      '--session-id', binding.session_id, '--data-dir', binding.plugin_data_dir], {
+      env: { ...process.env, POWERCONTEXT_ZCODE_AUTHORIZATION: 'Bearer test-only' }, timeout: 5000,
+    })
+    const observed = JSON.parse(status.stdout)
+    assert.equal(observed.status, 'observed')
+    assert.equal(observed.incomplete, false)
+    assert.equal(observed.observation.stages.capture.state, 'accepted')
+    assert.equal(observed.observation.stages.context_output.state, 'emitted')
+    assert.equal(observed.observation.scope_id, 'scope-zcode-host-test')
 
     await close(powercontext)
     powercontextOpen = false

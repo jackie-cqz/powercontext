@@ -59,16 +59,25 @@ export async function request(settings, method, path, body, budgetSignal) {
   const origin = serverOrigin(settings)
   const signal = AbortSignal.any([budgetSignal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
   signal.throwIfAborted()
-  const response = await fetch(`${origin}${path}`, {
-    method, redirect: 'error', signal,
-    headers: {
-      Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-      ...(settings.authorization ? { Authorization: settings.authorization } : {}),
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  })
-  if (!response.ok) throw new Error(`http_${response.status}`)
-  return { status: response.status, body: await readJson(response, signal) }
+  let status
+  try {
+    const response = await fetch(`${origin}${path}`, {
+      method, redirect: 'error', signal,
+      headers: {
+        Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...(settings.authorization ? { Authorization: settings.authorization } : {}),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    })
+    status = response.status
+    if (!response.ok) throw new Error(`http_${status}`)
+    return { status, body: await readJson(response, signal) }
+  } catch (error) {
+    // After fetch starts, delivery cannot be disproved by a transport error.
+    error.requestSent = true
+    if (status !== undefined) error.httpStatus = status
+    throw error
+  }
 }
 
 export function failureCode(error) {

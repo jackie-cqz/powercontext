@@ -29,6 +29,7 @@ let server
 let serverUrl
 const requests = []
 let override = {}
+let dataDir
 
 beforeEach(() => {
   requests.length = 0
@@ -36,6 +37,7 @@ beforeEach(() => {
 })
 
 before(async () => {
+  dataDir = await mkdtemp(join(tmpdir(), 'pc-zcode-observations-'))
   server = createServer(async (request, response) => {
     const chunks = []
     for await (const chunk of request) chunks.push(chunk)
@@ -60,7 +62,7 @@ before(async () => {
     } else if (request.url === '/v1/sources/content') {
       response.statusCode = 202
       response.end(JSON.stringify({
-        status: 'accepted', source: { source_type: 'content', source_id: body.source_id }, position: 1,
+        status: 'accepted', source: { name: 'content', source_id: body.source_id }, position: 1,
       }))
     } else {
       response.statusCode = 404
@@ -72,13 +74,14 @@ before(async () => {
 })
 
 after(async () => {
+  await rm(dataDir, { recursive: true, force: true })
   await new Promise(resolve => server.close(resolve))
 })
 
 function invoke(payload, environment = {}, script = hookPath) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [script], {
-      env: { ...process.env, POWERCONTEXT_ZCODE_SERVER_URL: serverUrl, ...environment },
+      env: { ...process.env, POWERCONTEXT_ZCODE_SERVER_URL: serverUrl, ZCODE_PLUGIN_DATA: dataDir, ...environment },
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     let stdout = ''
