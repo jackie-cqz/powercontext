@@ -17,7 +17,7 @@
 import { isAbsolute } from 'node:path'
 import { parseArgs } from 'node:util'
 import { loadSettings, nonempty } from '../shared/settings.mjs'
-import { resolveScope, sessionIdentity, workspaceKey } from '../shared/scope.mjs'
+import { isScopeId, resolveScope, sessionIdentity, workspaceKey } from '../shared/scope.mjs'
 import { failureCode, HOOK_BUDGET_MS, request, serverOrigin } from '../shared/transport.mjs'
 
 const schema = 'powercontext.zcode.scope-result.v1'
@@ -32,7 +32,7 @@ try {
   const action = args.positionals[0]
   const cwd = nonempty(args.values.cwd)
   if (args.positionals.length !== 1 || !['resolve', 'bind', 'unbind'].includes(action) || !cwd || !isAbsolute(cwd) ||
-      action !== 'bind' && args.values['scope-id'] !== undefined || action === 'bind' && !nonempty(args.values['scope-id'])) {
+      action !== 'bind' && args.values['scope-id'] !== undefined || action === 'bind' && !isScopeId(args.values['scope-id'])) {
     throw new Error('invalid_arguments')
   }
   const input = { cwd, sessionId: args.values['session-id'] }
@@ -43,8 +43,7 @@ try {
   if (action !== 'resolve') {
     if (settings.remoteWorkspace) throw new Error('remote_binding_disabled')
     const key = workspaceKey(cwd)
-    const target = nonempty(args.values['scope-id'])
-    if (target && (target.length > 256 || /[\r\n\0]/u.test(target))) throw new Error('invalid_arguments')
+    const target = args.values['scope-id']
     binding = { action, status: 'unknown' }
     let response
     try {
@@ -56,7 +55,7 @@ try {
       if (/^http_4\d\d$/u.test(error?.message ?? '')) binding.status = 'rejected'
       throw error
     }
-    if (response.status !== 200 || action === 'bind' && (response.body.scope_id !== args.values['scope-id'].trim() ||
+    if (response.status !== 200 || action === 'bind' && (response.body.scope_id !== target ||
         !response.body.key || Object.entries(key).some(([name, value]) => response.body.key[name] !== value)) ||
         action === 'unbind' && typeof response.body.cleared !== 'boolean') {
       throw new Error('binding_not_confirmed')

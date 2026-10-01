@@ -17,7 +17,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, open, opendir, rename, unlink, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, resolve } from 'node:path'
-import { bindingKeys, sessionIdentity, sha256 } from './scope.mjs'
+import { bindingKeys, isScopeId, sessionIdentity, sha256 } from './scope.mjs'
 import { failureCode, HOOK_BUDGET_MS, REQUEST_TIMEOUT_MS, serverOrigin } from './transport.mjs'
 
 const SCHEMA = 'powercontext.zcode.runtime-observation.v1'
@@ -92,7 +92,7 @@ function validateRecord(record) {
     event_source: ['startup', 'clear', 'resume', 'compact'].includes(record.event_source) ? record.event_source : null,
     identity: Object.fromEntries(['endpoint', 'profile', 'session', 'workspace'].map(name => [name, record.identity[name]])),
     started_at: record.started_at, completed_at: record.completed_at,
-    scope_id: typeof record.scope_id === 'string' && /^[A-Za-z0-9:_-]{1,256}$/u.test(record.scope_id) ? record.scope_id : null,
+    scope_id: isScopeId(record.scope_id) ? record.scope_id : null,
     config: { server_url: endpoint, server_url_source: config.server_url_source, capture_prompts: config.capture_prompts,
       allow_insecure_http: config.allow_insecure_http === true, authorization_configured: config.authorization_configured,
       boundary_flush: config.boundary_flush === true,

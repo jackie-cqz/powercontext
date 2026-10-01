@@ -15,10 +15,10 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { mkdir, open, opendir, rename, unlink, writeFile } from 'node:fs/promises'
+import { link, mkdir, open, opendir, rename, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { observationIdentity, stageResult } from './observations.mjs'
-import { sessionIdentity, sha256 } from './scope.mjs'
+import { isScopeId, sessionIdentity, sha256 } from './scope.mjs'
 import { failureCode, request } from './transport.mjs'
 
 const SCHEMA = 'powercontext.zcode.pending.v1'
@@ -62,7 +62,7 @@ function scopeKey(identity, scopeId) {
 
 function valid(value) {
   return value && ['endpoint', 'profile', 'session', 'workspace'].every(key => /^[a-f0-9]{64}$/u.test(value.identity?.[key])) &&
-    typeof value.scope_id === 'string' && /^[A-Za-z0-9:_-]{1,256}$/u.test(value.scope_id) &&
+    isScopeId(value.scope_id) &&
     Number.isSafeInteger(value.created_at) && (value.kind === 'track' || value.kind === 'receipt' &&
       Number.isSafeInteger(value.position) && value.position > 0)
 }
@@ -110,8 +110,23 @@ async function exists(path) {
   try { await read(path); return true } catch (error) { if (error.code === 'ENOENT') return false; throw error }
 }
 
+async function pauseExists(path) {
+  let file
+  try {
+    file = await open(path, 'r')
+    if (!(await file.stat()).isFile()) throw new Error('invalid_pending')
+    return true
+  } catch (error) { if (error.code === 'ENOENT') return false; throw error }
+  finally { await file?.close() }
+}
+
+function incompletePause(error) {
+  return error instanceof SyntaxError || error.code === 'ERR_ENCODING_INVALID_ENCODED_DATA'
+}
+
 export async function beginCaptureTracking(input, settings, keys, scopeId, dataDir = process.env.ZCODE_PLUGIN_DATA) {
   if (!sessionIdentity(input)) throw new Error('session_required')
+  if (!isScopeId(scopeId)) throw new Error('invalid_pending')
   const identity = observationIdentity(input, settings, dataDir, keys)
   const directory = join(dataDir, 'pending')
   await mkdir(directory, { recursive: true })
@@ -160,20 +175,21 @@ export async function flushBoundary(input, settings, keys, resolveCurrent, signa
   if (!eligible.length) return stageResult('skipped', { reason: 'scope_changed' })
   if (eligible.some(({ value }) => value.kind === 'track')) return stageResult('skipped', { reason: 'tracking_incomplete' })
   const pause = join(directory, `pause-${scopeKey(identity, scope.scopeId)}.json`)
-  if (await exists(pause)) return stageResult('unknown', { reason: 'unknown_flush_paused' })
+  if (await pauseExists(pause)) return stageResult('unknown', { reason: 'unknown_flush_paused' })
   if (!await lease(directory, identity)) return stageResult('skipped', { reason: 'claim_busy' })
   const target = Math.max(...eligible.map(({ value }) => value.position))
   signal.throwIfAborted()
   // Persist uncertainty BEFORE sending. A crash/timeout cannot permit an automatic retry.
+  const temporary = `${pause}.${randomUUID()}.tmp`
   try {
-    const file = await open(pause, 'wx', 0o600)
-    try { await file.writeFile(JSON.stringify({ schema: SCHEMA, kind: 'pause', identity, scope_id: scope.scopeId,
-      target_position: target, created_at: Date.now() })) }
-    finally { await file.close() }
+    await writeFile(temporary, JSON.stringify({ schema: SCHEMA, kind: 'pause', identity, scope_id: scope.scopeId,
+      target_position: target, created_at: Date.now() }), { mode: 0o600, flag: 'wx' })
+    // A hard link publishes complete bytes atomically and cannot overwrite another writer's pause.
+    await link(temporary, pause)
   } catch (error) {
     if (error.code === 'EEXIST') return stageResult('unknown', { reason: 'unknown_flush_paused' })
     throw error
-  }
+  } finally { await unlink(temporary).catch(() => {}) }
   let value
   try {
     const result = await request(settings, 'POST', '/v1/memory/flush', { scope_id: scope.scopeId }, signal)
@@ -212,13 +228,16 @@ export async function flushBoundary(input, settings, keys, resolveCurrent, signa
 export async function queryPending(input, settings, dataDir, latest = false) {
   const identity = observationIdentity(input, settings, dataDir)
   const directory = join(dataDir, 'pending')
-  const records = (await snapshot(directory)).filter(({ value }) =>
+  const snapshotRecords = await snapshot(directory)
+  const pauseOwners = new Set(snapshotRecords.filter(({ value }) => value.kind === 'receipt')
+    .map(({ value }) => scopeKey(value.identity, value.scope_id)))
+  const records = snapshotRecords.filter(({ value }) =>
     ['endpoint', 'profile', latest ? 'workspace' : 'session'].every(key => value.identity[key] === identity[key]))
   const groups = new Map()
   for (const { value } of records) {
     const key = scopeKey(value.identity, value.scope_id)
     const group = groups.get(key) ?? { scope_id: value.scope_id, receipt_count: 0, target_position: null,
-      tracking_incomplete: false, unknown_flush_paused: await exists(join(directory, `pause-${key}.json`)) }
+      tracking_incomplete: false, unknown_flush_paused: await pauseExists(join(directory, `pause-${key}.json`)) }
     if (value.kind === 'receipt') {
       group.receipt_count++
       group.target_position = Math.max(group.target_position ?? 0, value.position)
@@ -234,7 +253,12 @@ export async function queryPending(input, settings, dataDir, latest = false) {
       if (!/^pause-[a-f0-9]{64}\.json$/u.test(entry.name)) continue
       let value
       try { value = await read(join(directory, entry.name)) }
-      catch (error) { if (error.code === 'ENOENT') continue; throw error }
+      catch (error) {
+        if (error.code === 'ENOENT') continue
+        // Legacy interrupted writes have no readable identity. Only matching receipts can identify their pause.
+        if (incompletePause(error) && pauseOwners.has(entry.name.slice(6, -5))) continue
+        throw error
+      }
       if (value.kind !== 'pause' || !valid({ ...value, kind: 'track' }) ||
           !Number.isSafeInteger(value.target_position) || value.target_position < 1) throw new Error('invalid_pending')
       const key = scopeKey(value.identity, value.scope_id)
@@ -256,10 +280,18 @@ export async function authorizeUnknownFlushRetry(input, settings, keys, scopeId,
   const directory = join(dataDir, 'pending')
   const pause = join(directory, `pause-${scopeKey(identity, scopeId)}.json`)
   let value
-  try { value = await read(pause) } catch (error) { if (error.code === 'ENOENT') return 'not_paused'; throw error }
-  if (value.kind !== 'pause' || !identityMatches(value.identity, identity) || value.scope_id !== scopeId ||
+  try { value = await read(pause) } catch (error) {
+    if (error.code === 'ENOENT') return 'not_paused'
+    if (!incompletePause(error) || !await pauseExists(pause)) throw error
+  }
+  const records = await snapshot(directory)
+  if (value === undefined) {
+    // Explicit recovery of a legacy partial pause requires persisted evidence for this exact owner and Scope.
+    if (!records.some(({ value: record }) => record.kind === 'receipt' &&
+        identityMatches(record.identity, identity) && record.scope_id === scopeId)) throw new Error('invalid_pending')
+  } else if (value.kind !== 'pause' || !valid({ ...value, kind: 'track' }) ||
+      !identityMatches(value.identity, identity) || value.scope_id !== scopeId ||
       !Number.isSafeInteger(value.target_position) || value.target_position < 1) throw new Error('invalid_pending')
-  await snapshot(directory)
   if (!await lease(directory, identity)) throw new Error('claim_busy')
   await unlink(pause)
   return 'retry_authorized'

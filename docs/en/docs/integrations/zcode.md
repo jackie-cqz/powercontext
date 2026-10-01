@@ -242,8 +242,8 @@ paused unknown flushes. `cursor_reached` proves only a validated processing curs
 read actual Memory and recall separately. A concurrent later receipt stays pending. With an idle/behind cursor, receipts
 remain. A capture whose delivery is unknown has no fabricated position and pauses affected automatic tracking.
 
-Flush uncertainty is persisted **before** the request. Timeout, disconnection, invalid response or interrupted process
-preserves the pause even after its claim expires. The public contract does not fully confirm in-flight work, so automatic
+Flush uncertainty is published completely **before** the request. After publication, timeout, disconnection, invalid
+response or interrupted process preserves the pause even after its claim expires. The public contract does not fully confirm in-flight work, so automatic
 retry remains paused; the scheduler and ordinary task can continue. After inspecting the Server and explicitly deciding
 to accept the risk of repeating an unknown flush, use the metadata's installed `pending_script`:
 
@@ -255,6 +255,11 @@ node '<installed pending_script>' resume-flush --cwd (Get-Location).Path --sessi
 This verifies the current Scope and releases only its flush pause; it sends no flush, discards no receipt, and does not
 clear an unknown capture or incomplete-tracking marker. `claim_busy` means retry this explicit control after the active
 claim window. A later enabled Stop can process the retained receipts. Do not release pauses automatically from a Skill.
+
+Pause files are published atomically without replacing an existing pause, before any flush request is sent.
+An incomplete pause from an interrupted write remains paused. When a retained receipt identifies its exact
+Server/profile/session and Scope, the same explicit control can recover it without discarding the receipt.
+An unreadable pause without matching receipt evidence is rejected rather than automatically cleared.
 
 Pending storage is bounded to 256 receipt/tracking records, 512 directory entries and 16 KiB per record. Saturation
 preserves unconfirmed evidence, reports tracking incomplete and stops automatic flush; Source capture continues.
@@ -376,6 +381,9 @@ finally the Server default. A canonical Git-root or workspace path is hashed int
 itself is not a Scope ID. For a remote workspace, set `POWERCONTEXT_ZCODE_REMOTE_WORKSPACE=true` and an existing
 `POWERCONTEXT_ZCODE_SCOPE_ID` before launching ZCode, so the Hook skips local path inference. MCP tools still need
 the correct Scope when called.
+
+Scope IDs are opaque nonblank strings of at most 256 Unicode characters. Punctuation, Unicode and surrounding
+whitespace are preserved in resolution, pending receipts and runtime observations.
 
 ## Diagnose MCP tools and the automatic Hook
 

@@ -25,6 +25,11 @@ export function sha256(value) {
   return createHash('sha256').update(value).digest('hex')
 }
 
+export function isScopeId(value) {
+  // Scope IDs are opaque; the built-in contract counts Unicode characters and rejects blank values.
+  return typeof value === 'string' && [...value].length <= 256 && /[^\p{White_Space}\u001c-\u001f]/u.test(value)
+}
+
 export function sessionIdentity(input) {
   const ids = [input.sessionId, input.session_id, process.env.ZCODE_SESSION_ID].map(nonempty).filter(Boolean)
   if (new Set(ids).size > 1) throw new Error('session_conflict')
@@ -62,7 +67,7 @@ export async function resolveScope(input, settings, budgetSignal, keys = binding
   const result = await request(settings, 'POST', '/v1/scope-bindings/resolve', {
     explicit_scope_id: settings.explicitScopeId ?? null, binding_keys: keys,
   }, budgetSignal)
-  const scopeId = nonempty(result.body.scope_id)
-  if (result.status !== 200 || !scopeId || scopeId.length > 256) throw new Error('scope_unresolved')
+  const scopeId = result.body.scope_id
+  if (result.status !== 200 || !isScopeId(scopeId)) throw new Error('scope_unresolved')
   return { scopeId, keys }
 }

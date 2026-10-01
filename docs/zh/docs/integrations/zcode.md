@@ -217,7 +217,7 @@ Stop 不阻断或续跑模型，不总结回答，不创建 Handoff/Receipt/Task
 `cursor_reached` 仅证明合法处理 cursor 覆盖本次选中 receipt 快照；Memory 与实际召回须单独回读。
 并发新增的更大 position 保留；idle/未追平时也保留。未知 capture 不伪造 position，并暂停受影响 Scope 的自动跟踪处理。
 
-发出 flush **之前**先保存不确定性。超时、断连、无效响应或进程中止都会保留 pause，claim 过期不会解除它。
+发出 flush **之前**先完整发布不确定性标记。发布后，超时、断连、无效响应或进程中止都会保留 pause，claim 过期不会解除它。
 当前公共契约无法完整确认在途工作，因此不自动重试；scheduler 和普通任务可以继续。
 检查 Server 后，用户明确接受重复未知 flush 的风险时，使用本轮元数据中的 `pending_script`：
 
@@ -228,6 +228,10 @@ node '<已安装的 pending_script>' resume-flush --cwd (Get-Location).Path --se
 
 该命令核对当前 Scope，仅解除对应 flush pause，不发 flush、不丢弃 receipt，也不清未知 capture 或 tracking-incomplete 标记。
 `claim_busy` 表示等待当前 claim 窗口后再执行这项已授权控制；后续开启的 Stop 才能处理保留的 receipt。Skill 不自动解除暂停。
+
+pause 文件在发送 flush 前完整写入并原子发布，不覆盖已有 pause。写入中断留下的残缺 pause 仍保持暂停。
+保留的 receipt 能确认其精确 Server/profile/session 和 Scope 时，同一显式恢复命令可以解除暂停，同时保留 receipt。
+无法通过匹配 receipt 确认归属的不可读 pause 会被拒绝恢复，不会自动清除。
 
 Pending 最多 256 条 receipt/tracking、512 个目录项，单条读取最多 16 KiB。达到上限时保留未确认记录、报告 tracking incomplete，
 停止自动 flush；Source capture 仍继续。采集前保存 guard，接受后才能转换成 receipt。过期的已知版本 claim 文件可清理，
@@ -328,6 +332,9 @@ Hook 按 `POWERCONTEXT_ZCODE_SCOPE_ID`、当前 session binding、workspace bind
 解析 Scope。workspace 使用 Git 根目录或工作目录的规范化路径哈希作为 binding key；路径本身不是 Scope ID。
 远程工作区需要在启动宿主前设置 `POWERCONTEXT_ZCODE_REMOTE_WORKSPACE=true`，并给出已有的
 `POWERCONTEXT_ZCODE_SCOPE_ID`，Hook 才会跳过本地路径推断。MCP 工具执行时仍需选择正确的 Scope。
+
+Scope ID 是最多 256 个 Unicode 字符的非空白不透明字符串。解析、pending receipt 和运行观察均保留原值，
+包括标点、Unicode 字符和首尾空白。
 
 ## 排查 MCP 工具与自动 Hook
 

@@ -57,6 +57,6 @@ export function loadSettings() {
     boundaryFlush: boundary !== undefined ? !['0', 'false', 'no', 'off'].includes(boundary.toLowerCase()) : installed.boundary_flush === true,
     authorization: process.env.POWERCONTEXT_ZCODE_AUTHORIZATION,
     remoteWorkspace: enabled(process.env.POWERCONTEXT_ZCODE_REMOTE_WORKSPACE),
-    explicitScopeId: nonempty(process.env.POWERCONTEXT_ZCODE_SCOPE_ID),
+    explicitScopeId: process.env.POWERCONTEXT_ZCODE_SCOPE_ID || undefined,
   }
 }

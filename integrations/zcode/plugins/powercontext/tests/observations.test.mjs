@@ -22,6 +22,23 @@ import { request } from '../shared/transport.mjs'
 
 const plugin = fileURLToPath(new URL('..', import.meta.url))
 
+test('runtime observations preserve opaque Scope IDs exactly', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pc-zcode-opaque-runtime-'))
+  try {
+    const settings = { serverUrl: 'http://127.0.0.1:8000', serverUrlSource: 'installed', capturePrompts: true }
+    for (const [index, scopeId] of ['project.alpha', ' 项目 / alpha 🚀 ', '🚀'.repeat(256), '\ufeff'].entries()) {
+      const input = { cwd: root, sessionId: `opaque-${index}`, hookEventName: 'UserPromptSubmit' }
+      const observation = await startObservation(input, settings, bindingKeys(input, settings), root)
+      await observation.stage('scope', stageResult('resolved'), scopeId)
+      await observation.finish()
+      const status = await queryObservations(input, settings, root)
+      assert.equal(status.status, 'observed')
+      assert.equal(status.observation.scope_id, scopeId)
+      assert.deepEqual(status.issues, [])
+    }
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
 test('Hook observations preserve latest-attempt order, unknown writes and content-free status', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pc-zcode-runtime-'))
   let slowStarted

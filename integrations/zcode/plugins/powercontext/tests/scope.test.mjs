@@ -100,6 +100,14 @@ test('installed Scope resolver agrees with Hook and keeps binding writes distinc
     assert.equal((await scope('unbind')).body.binding.status, 'absent')
     const explicit = await scope('bind', { POWERCONTEXT_ZCODE_SCOPE_ID: 'explicit-scope' }, ['--scope-id', 'workspace-scope'])
     assert.equal(explicit.body.resolution_note, 'explicit_scope_override')
+    const opaqueScope = ' 项目.alpha / 🚀 '
+    const opaque = await scope('resolve', { POWERCONTEXT_ZCODE_SCOPE_ID: opaqueScope })
+    assert.equal(opaque.code, 0)
+    assert.equal(opaque.body.scope_id, opaqueScope)
+    assert.equal(seen.at(-1).body.explicit_scope_id, opaqueScope)
+    const opaqueBinding = await scope('bind', {}, ['--scope-id', opaqueScope])
+    assert.equal(opaqueBinding.code, 0)
+    assert.equal(opaqueBinding.body.binding.scope_id, opaqueScope)
     const before = seen.length
     const conflict = await scope('resolve', { ZCODE_SESSION_ID: 'different' })
     assert.equal(conflict.code, 1)
