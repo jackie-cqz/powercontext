@@ -1,6 +1,7 @@
 # PowerContext evaluation console
 
 For Claude Code + MCP Skill instruction regressions, see the separate [skill-up guidance suite](skill-up/README.md).
+For ZCode's native CLI, see the [ZCode Skill behavior evaluation](zcode_guidance/README.md).
 It grades tool routing and authorization boundaries against a pinned Skill with controlled MCP replies and a no-Skill
 baseline. Its scores complement the integration-guidance record and must not be combined with SWE-bench Pro task
 outcomes or LoCoMo memory-quality measurements.
