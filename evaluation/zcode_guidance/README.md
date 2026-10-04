@@ -36,7 +36,7 @@ Run from the repository root with the normal development dependencies:
 
 ```powershell
 uv run --locked python -m evaluation.zcode_guidance.pin --check
-uv run --locked pytest evaluation/zcode_guidance/tests -q
+uv run --locked python -m pytest evaluation/zcode_guidance/tests -q
 ```
 
 The offline tests cover contract projection, controlled replies and false-pass regressions in the grader. They do
