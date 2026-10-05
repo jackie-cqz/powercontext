@@ -61,6 +61,8 @@ jobs:
         run: |
           uv run --locked --no-sync python -m evaluation.zcode_guidance.pin --check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv run --locked --no-sync python -m evaluation.zcode_guidance.run --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           uv run --locked --no-sync python -m pytest evaluation/zcode_guidance/tests -q
 
       - name: Record build provenance

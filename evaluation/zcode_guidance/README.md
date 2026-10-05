@@ -36,11 +36,14 @@ Run from the repository root with the normal development dependencies:
 
 ```powershell
 uv run --locked python -m evaluation.zcode_guidance.pin --check
+uv run --locked python -m evaluation.zcode_guidance.run --help
 uv run --locked python -m pytest evaluation/zcode_guidance/tests -q
 ```
 
-The offline tests cover contract projection, controlled replies and false-pass regressions in the grader. They do
-not establish model behavior. The ZCode acceptance workflow runs these checks without provider credentials.
+The `run --help` smoke check loads the live runner and its shared acceptance imports, then validates its command-line
+entry point without starting a host or calling a model. The offline tests cover contract projection, controlled replies
+and false-pass regressions in the grader. They do not establish model behavior. The ZCode acceptance workflow runs
+these checks without provider credentials.
 
 `skill-lock.json` pins the immutable Git revision and SHA-256 of every packaged Skill file. A changed checkout fails
 the pin check. To evaluate a deliberately updated, committed Skill:
