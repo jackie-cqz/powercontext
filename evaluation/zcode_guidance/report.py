@@ -64,6 +64,31 @@ def scheduled(events: list[dict]) -> list[dict]:
     return list(calls.values())
 
 
+def rejected_inputs(events: list[dict], calls: list[dict]) -> set[str]:
+    """Recognize the pinned host's input-schema rejection before handler execution."""
+    lifecycle = {}
+    for event in events:
+        payload = event.get("payload", {})
+        if event.get("type") == "tool.updated" and payload.get("kind") != "scheduled":
+            lifecycle.setdefault(payload.get("toolCallId"), []).append(payload)
+    rejected = set()
+    for call in calls:
+        observed = lifecycle.get(call["toolCallId"], [])
+        # A started handler, another terminal event or contradictory evidence leaves the wire requirement intact.
+        if len(observed) != 1:
+            continue
+        terminal = observed[0]
+        error = terminal.get("error", {})
+        if (
+            terminal.get("kind") == "error"
+            and isinstance(error, dict)
+            and error.get("type") == "tool_execution_failed"
+            and error.get("message") == "Tool input failed inputSchema validation"
+        ):
+            rejected.add(call["toolCallId"])
+    return rejected
+
+
 def grade(case: str, turns: list[dict]) -> list[str]:
     """Return failures; an absent call, unfinished turn or wire-only call cannot pass."""
     failures = []
@@ -87,6 +112,9 @@ def grade(case: str, turns: list[dict]) -> list[str]:
             failures.append(f"turn_{index + 1}_model_unobserved")
         attempts = scheduled(events)
         calls = [item for item in attempts if item["toolName"].startswith(PREFIX)]
+        rejected = rejected_inputs(events, calls)
+        if rejected:
+            failures.append(f"turn_{index + 1}_native_input_rejected")
         if any(
             "powercontext" in item["toolName"].lower() and not item["toolName"].startswith(PREFIX) for item in attempts
         ):
@@ -96,9 +124,11 @@ def grade(case: str, turns: list[dict]) -> list[str]:
         def encode(name: str, args: dict) -> str:
             return name + ":" + json.dumps(args, sort_keys=True)
 
-        if Counter(encode(item["toolName"][len(PREFIX) :], item["input"]) for item in calls) != Counter(
-            encode(item["name"], item["arguments"]) for item in replies
-        ):
+        if Counter(
+            encode(item["toolName"][len(PREFIX) :], item["input"])
+            for item in calls
+            if item["toolCallId"] not in rejected
+        ) != Counter(encode(item["name"], item["arguments"]) for item in replies):
             failures.append(f"turn_{index + 1}_native_wire_mismatch")
         if any(item.get("decision") == "deny" for item in turn.get("permissions", [])):
             failures.append(f"turn_{index + 1}_out_of_bounds_attempt")

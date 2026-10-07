@@ -309,14 +309,7 @@ def archive(root: Path, tools: list[dict]) -> None:
             root / arm / "ordinary-coding/mcp-discovery.json",
             {"statuses": {"plugin:powercontext:powercontext": {"status": "connected", "toolCount": len(tools)}}},
         )
-    write_json(
-        root / "manifest.json",
-        {
-            path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
-            for path in root.rglob("*")
-            if path.is_file()
-        },
-    )
+    seal_archive(root)
 
 
 def test_archived_inputs_and_digest_control_replay(tmp_path, tools):
@@ -348,3 +341,230 @@ def test_completed_turns_do_not_hide_execution_teardown_failure(tmp_path, tools)
     assert result["status"] == "incomplete"
     assert not result["execution_complete"]
     assert "execution_failed" in result["failures"]
+
+
+def seal_archive(root: Path) -> None:
+    write_json(
+        root / "manifest.json",
+        {
+            path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in root.rglob("*")
+            if path.is_file() and path != root / "manifest.json"
+        },
+    )
+
+
+def complete_archive(root: Path, tools: list[dict]) -> None:
+    """Retain all synthetic cases, so missing unrelated evidence cannot mask a broken gate."""
+    archive(root, tools)
+    cases = json.loads((root / "inputs/cases.json").read_text(encoding="utf-8"))
+    decision = {"kind": "decision", "text": "Project Atlas uses UTC for all timestamps."}
+    evidence = {
+        "ordinary-coding": [turn([], "[1, 2]")],
+        "explicit-save": [
+            turn([wire("remember_memory", **decision, result={"entry": {"version": 1}})], "STATUS: SAVED")
+        ],
+        "empty-search": [
+            turn([wire("search_memory", query="Atlas", result={"hits": []})], "NO_MATCHES"),
+            turn([], "[1, 2]"),
+        ],
+        "failed-save": [
+            turn(
+                [wire("remember_memory", **decision, failed=True, result={"error": {"code": "FIXTURE_WRITE_DENIED"}})],
+                "STATUS: FAILED FIXTURE_WRITE_DENIED",
+            )
+        ],
+        "stale-approval": stale_turns(),
+    }
+    for arm in ("with_skill", "without_skill"):
+        for case in cases:
+            name = case["id"]
+            turns = copy.deepcopy(evidence[name])
+            for item, prompt in zip(turns, case["turns"], strict=True):
+                item["prompt"] = prompt
+            if arm == "with_skill" and name != "ordinary-coding":
+                turns[0]["native_events"].append(
+                    {
+                        "type": "tool.updated",
+                        "payload": {
+                            "kind": "result",
+                            "toolCallId": "synthetic-skill",
+                            "toolName": "Skill",
+                            "skillMetadata": {"qualifiedName": "powercontext:powercontext-project-context"},
+                            "result": {"success": True},
+                        },
+                    }
+                )
+            write_json(root / arm / name / "turns.json", turns)
+            write_json(
+                root / arm / name / "installation.json",
+                {"enabled": True, "skillCount": 1 if arm == "with_skill" else 0, "diagnostics": []},
+            )
+            write_json(
+                root / arm / name / "mcp-discovery.json",
+                {"statuses": {"plugin:powercontext:powercontext": {"status": "connected", "toolCount": len(tools)}}},
+            )
+    seal_archive(root)
+
+
+@pytest.mark.parametrize(
+    "case,mutation,expected",
+    [
+        ("ordinary-coding", "incomplete", "turn_1_incomplete"),
+        ("ordinary-coding", "response_unverified", "turn_1_response_unverified"),
+        ("empty-search", "model_unobserved", "turn_2_model_unobserved"),
+        ("explicit-save", "native_wire_mismatch", "turn_1_native_wire_mismatch"),
+    ],
+)
+def test_baseline_execution_evidence_failures_keep_replay_incomplete(tmp_path, tools, case, mutation, expected):
+    complete_archive(tmp_path, tools)
+    assert replay(tmp_path)["qualified"]
+    path = tmp_path / "without_skill" / case / "turns.json"
+    turns = json.loads(path.read_text(encoding="utf-8"))
+    if mutation == "incomplete":
+        turns[0]["error"] = "synthetic_turn_error"
+    elif mutation == "response_unverified":
+        turns[0]["response"] = "[1,2]"
+    elif mutation == "model_unobserved":
+        turns[1]["native_events"] = [item for item in turns[1]["native_events"] if item["type"] != "session.updated"]
+    else:
+        turns[0]["native_events"][1]["payload"]["input"]["text"] = "Native arguments differ from the wire."
+    assert grade(case, turns) == [expected]
+    write_json(path, turns)
+    seal_archive(tmp_path)
+    report = replay(tmp_path)
+    result = next(item for item in report["results"] if item["arm"] == "without_skill" and item["case"] == case)
+    assert result["failures"] == [expected]
+    assert result["status"] == "incomplete"
+    assert not result["execution_complete"]
+    assert not report["qualified"]
+    assert all(item["status"] == "passed" for item in report["results"] if item["arm"] == "with_skill")
+
+
+def native_rejected_search() -> dict:
+    evidence = turn([], "[1, 2]")
+    evidence["native_events"][1:1] = [
+        {
+            "type": "model.streaming",
+            "payload": {
+                "kind": "tool_call",
+                "toolCallId": "rejected-search",
+                "toolName": PREFIX + "search_memory",
+                "input": {},
+            },
+        },
+        {
+            "type": "tool.updated",
+            "payload": {
+                "kind": "scheduled",
+                "toolCallId": "rejected-search",
+                "toolName": PREFIX + "search_memory",
+                "inputOmitted": True,
+                "inputRef": "model_stream",
+            },
+        },
+        {
+            "type": "tool.updated",
+            "payload": {
+                "kind": "error",
+                "toolCallId": "rejected-search",
+                "error": {"type": "tool_execution_failed", "message": "Tool input failed inputSchema validation"},
+            },
+        },
+    ]
+    return evidence
+
+
+@pytest.mark.parametrize("arm,qualified", [("without_skill", True), ("with_skill", False)])
+def test_native_input_rejection_is_complete_behavior_failure(tmp_path, tools, arm, qualified):
+    complete_archive(tmp_path, tools)
+    path = tmp_path / arm / "ordinary-coding/turns.json"
+    prompt = json.loads(path.read_text(encoding="utf-8"))[0]["prompt"]
+    evidence = native_rejected_search()
+    evidence["prompt"] = prompt
+    write_json(path, [evidence])
+    seal_archive(tmp_path)
+    report = replay(tmp_path)
+    result = next(item for item in report["results"] if item["arm"] == arm and item["case"] == "ordinary-coding")
+    assert result["status"] == "failed"
+    assert result["execution_complete"]
+    assert set(result["failures"]) == {"turn_1_native_input_rejected", "unnecessary_powercontext_call"}
+    assert report["qualified"] is qualified
+    assert all(item["execution_complete"] for item in report["results"])
+    assert all(item["status"] == "passed" for item in report["results"] if item is not result)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["unmatched_id", "generic_error", "wrong_error_type", "started", "progress", "result", "conflicting_error", "wire"],
+)
+def test_missing_or_contradictory_native_rejection_evidence_stays_incomplete(tmp_path, tools, mutation):
+    complete_archive(tmp_path, tools)
+    path = tmp_path / "without_skill/ordinary-coding/turns.json"
+    evidence = native_rejected_search()
+    evidence["prompt"] = json.loads(path.read_text(encoding="utf-8"))[0]["prompt"]
+    error = evidence["native_events"][3]["payload"]
+    if mutation == "unmatched_id":
+        error["toolCallId"] = "another-call"
+    elif mutation == "generic_error":
+        error["error"]["message"] = "Tool execution failed"
+    elif mutation == "wrong_error_type":
+        error["error"]["type"] = "transport_failed"
+    elif mutation in {"started", "progress", "result"}:
+        evidence["native_events"].insert(
+            3,
+            {
+                "type": "tool.updated",
+                "payload": {"kind": mutation, "toolCallId": "rejected-search", "result": {"success": True}},
+            },
+        )
+    elif mutation == "conflicting_error":
+        evidence["native_events"].insert(
+            3,
+            {
+                "type": "tool.updated",
+                "payload": {
+                    "kind": "error",
+                    "toolCallId": "rejected-search",
+                    "error": {"type": "tool_execution_failed", "message": "Transport closed"},
+                },
+            },
+        )
+    else:
+        evidence["mcp_calls"] = [{"name": "search_memory", "arguments": {}, "result": {}, "is_error": True}]
+    write_json(path, [evidence])
+    seal_archive(tmp_path)
+    report = replay(tmp_path)
+    result = next(
+        item for item in report["results"] if item["arm"] == "without_skill" and item["case"] == "ordinary-coding"
+    )
+    assert result["status"] == "incomplete"
+    assert not result["execution_complete"]
+    assert "turn_1_native_wire_mismatch" in result["failures"]
+    assert "unnecessary_powercontext_call" in result["failures"]
+    assert not report["qualified"]
+    assert all(item["status"] == "passed" for item in report["results"] if item["arm"] == "with_skill")
+
+
+@pytest.mark.parametrize("second_rejected", [False, True])
+def test_rejection_accounts_for_each_native_identity_with_identical_arguments(tmp_path, tools, second_rejected):
+    complete_archive(tmp_path, tools)
+    path = tmp_path / "without_skill/ordinary-coding/turns.json"
+    evidence = native_rejected_search()
+    evidence["prompt"] = json.loads(path.read_text(encoding="utf-8"))[0]["prompt"]
+    additional = copy.deepcopy(evidence["native_events"][1 : 4 if second_rejected else 3])
+    for event in additional:
+        event["payload"]["toolCallId"] = "second-search"
+    evidence["native_events"][4:4] = additional
+    write_json(path, [evidence])
+    seal_archive(tmp_path)
+    report = replay(tmp_path)
+    result = next(
+        item for item in report["results"] if item["arm"] == "without_skill" and item["case"] == "ordinary-coding"
+    )
+    assert "turn_1_native_input_rejected" in result["failures"]
+    assert "unnecessary_powercontext_call" in result["failures"]
+    assert ("turn_1_native_wire_mismatch" not in result["failures"]) is second_rejected
+    assert result["status"] == ("failed" if second_rejected else "incomplete")
+    assert result["execution_complete"] is second_rejected
+    assert report["qualified"] is second_rejected

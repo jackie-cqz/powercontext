@@ -103,7 +103,10 @@ answer rules are deliberately transparent, and raw responses remain necessary fo
 inline-code and fenced-code list rendering is accepted. Regraded reports identify the actual grader's source hash.
 CLI exit status
 is zero only when both arms complete and all `with_skill` cases pass. Baseline results are reported separately;
-baseline behavior failure does not fail the gate, while incomplete baseline execution does. One paired run is not
+baseline behavior failure does not fail the gate, while incomplete baseline execution does. A completed turn with
+the pinned host's matching native input-schema rejection counts as a behavior failure; the rejected attempt still
+counts toward routing and retry rules, but requires no MCP wire call. Missing rejection evidence, contradictory
+handler events or unexplained native/wire differences leave execution incomplete. One paired run is not
 statistical evidence that the Skill improves behavior. A passing run means the
 listed cases passed for that exact host, model, Skill and contract, not that every possible instruction is safe.
 
