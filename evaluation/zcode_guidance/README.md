@@ -1,7 +1,7 @@
 # ZCode Skill behavior evaluation
 
 This suite runs the packaged PowerContext Skill through the **actual open-source ZCode CLI app-server and a live
-model**. It adapts the paired guidance evaluation used by [skill-up](../skill-up/README.md) to ZCode's native
+model**. It adapts the paired guidance evaluation used by [skill-up](../skills/skill-up/README.md) to ZCode's native
 session, plugin, permission and MCP protocols. It does not invoke skill-up's Claude Code harness.
 
 Each case has a fresh workspace, user profile and controlled HTTP MCP fixture. Both arms receive the same complete
