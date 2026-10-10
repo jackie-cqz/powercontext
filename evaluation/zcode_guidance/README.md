@@ -104,11 +104,12 @@ inline-code and fenced-code list rendering is accepted. Regraded reports identif
 CLI exit status
 is zero only when both arms complete and all `with_skill` cases pass. Baseline results are reported separately;
 baseline behavior failure does not fail the gate, while incomplete baseline execution does. A completed turn with
-the pinned host's matching native input-schema rejection counts as a behavior failure; the rejected attempt still
-counts toward routing and retry rules, but requires no MCP wire call. Missing rejection evidence, contradictory
-handler events or unexplained native/wire differences leave execution incomplete. One paired run is not
-statistical evidence that the Skill improves behavior. A passing run means the
-listed cases passed for that exact host, model, Skill and contract, not that every possible instruction is safe.
+the pinned host's matching native input-schema rejection, including non-object JSON inputs, counts as a behavior
+failure; the rejected attempt still counts toward routing and retry rules, but requires no MCP wire call. Missing
+rejection evidence, contradictory handler events or unexplained native/wire differences leave execution incomplete.
+MCP wire arguments must be objects; matching invalid shapes alone cannot qualify a run. One paired run is not
+statistical evidence that the Skill improves behavior. A passing run means the listed cases passed for that exact
+host, model, Skill and contract, not that every possible instruction is safe.
 
 CI runs the offline gate. Live model evaluation is an explicit maintainer run after changing the Skill, host pin or
 public contract; retain its report before claiming live qualification. CI does not replace missing live evidence with

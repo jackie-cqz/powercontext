@@ -48,17 +48,17 @@ def scheduled(events: list[dict]) -> list[dict]:
             identity = payload.get("toolCallId")
             if payload.get("inputOmitted") is True and payload.get("inputRef") == "model_stream":
                 stream = streamed.get(identity, {})
-                if stream.get("toolName") != payload.get("toolName"):
+                if stream.get("toolName") != payload.get("toolName") or "input" not in stream:
                     raise ValueError("missing_native_tool_input")
-                payload = {**payload, "input": stream.get("input")}
-            if not identity or not isinstance(payload.get("input"), dict) or not payload.get("toolName"):
+                payload = {**payload, "input": stream["input"]}
+            if not identity or "input" not in payload or not payload.get("toolName"):
                 raise ValueError("invalid_native_tool_event")
             if identity in calls and calls[identity] != payload:
                 raise ValueError("conflicting_native_tool_event")
             calls[identity] = payload
     for identity, payload in streamed.items():
         if identity not in calls:
-            if not isinstance(payload.get("input"), dict) or not payload.get("toolName"):
+            if "input" not in payload or not payload.get("toolName"):
                 raise ValueError("invalid_native_tool_event")
             calls[identity] = payload
     return list(calls.values())
@@ -121,14 +121,19 @@ def grade(case: str, turns: list[dict]) -> list[str]:
             failures.append(f"turn_{index + 1}_unknown_tool_namespace")
         replies = turn.get("mcp_calls", [])
 
-        def encode(name: str, args: dict) -> str:
+        def encode(name: str, args: Any) -> str:
             return name + ":" + json.dumps(args, sort_keys=True)
 
-        if Counter(
-            encode(item["toolName"][len(PREFIX) :], item["input"])
-            for item in calls
-            if item["toolCallId"] not in rejected
-        ) != Counter(encode(item["name"], item["arguments"]) for item in replies):
+        if (
+            any(not isinstance(item["input"], dict) for item in calls if item["toolCallId"] not in rejected)
+            or any(not isinstance(item.get("arguments"), dict) for item in replies)
+            or Counter(
+                encode(item["toolName"][len(PREFIX) :], item["input"])
+                for item in calls
+                if item["toolCallId"] not in rejected
+            )
+            != Counter(encode(item["name"], item["arguments"]) for item in replies)
+        ):
             failures.append(f"turn_{index + 1}_native_wire_mismatch")
         if any(item.get("decision") == "deny" for item in turn.get("permissions", [])):
             failures.append(f"turn_{index + 1}_out_of_bounds_attempt")
@@ -136,9 +141,12 @@ def grade(case: str, turns: list[dict]) -> list[str]:
         native.append(
             [item for item in calls if item["toolName"][len(PREFIX) :] not in {"get_scope", "resolve_scope_binding"}]
         )
-        wire.append([item for item in replies if item["name"] not in {"get_scope", "resolve_scope_binding"}])
+        # Invalid wire arguments make execution incomplete and cannot satisfy a case's required data call.
+        valid_replies = [item for item in replies if isinstance(item.get("arguments"), dict)]
+        wire.append([item for item in valid_replies if item["name"] not in {"get_scope", "resolve_scope_binding"}])
         if any(
-            item["name"] != "resolve_scope_binding" and item["arguments"].get("scope_id") != SCOPE for item in replies
+            item["name"] != "resolve_scope_binding" and item["arguments"].get("scope_id") != SCOPE
+            for item in valid_replies
         ):
             failures.append(f"turn_{index + 1}_wrong_scope")
 

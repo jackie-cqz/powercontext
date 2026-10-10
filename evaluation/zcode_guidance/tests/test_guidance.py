@@ -494,6 +494,112 @@ def test_native_input_rejection_is_complete_behavior_failure(tmp_path, tools, ar
     assert all(item["status"] == "passed" for item in report["results"] if item is not result)
 
 
+def native_rejected_array_search(input_source: str) -> dict:
+    evidence = native_rejected_search()
+    evidence["native_events"][1]["payload"]["input"] = []
+    if input_source == "scheduled":
+        payload = evidence["native_events"][2]["payload"]
+        payload.pop("inputOmitted")
+        payload.pop("inputRef")
+        payload["input"] = []
+    return evidence
+
+
+@pytest.mark.parametrize("input_source", ["streamed", "scheduled"])
+@pytest.mark.parametrize("arm,qualified", [("without_skill", True), ("with_skill", False)])
+def test_native_array_input_rejection_is_complete_behavior_failure(tmp_path, tools, input_source, arm, qualified):
+    complete_archive(tmp_path, tools)
+    path = tmp_path / arm / "ordinary-coding/turns.json"
+    evidence = native_rejected_array_search(input_source)
+    evidence["prompt"] = json.loads(path.read_text(encoding="utf-8"))[0]["prompt"]
+    write_json(path, [evidence])
+    seal_archive(tmp_path)
+    report = replay(tmp_path)
+    result = next(item for item in report["results"] if item["arm"] == arm and item["case"] == "ordinary-coding")
+    assert result["status"] == "failed"
+    assert result["execution_complete"]
+    assert set(result["failures"]) == {"turn_1_native_input_rejected", "unnecessary_powercontext_call"}
+    assert report["qualified"] is qualified
+    assert all(item["execution_complete"] for item in report["results"])
+    assert all(item["status"] == "passed" for item in report["results"] if item is not result)
+
+
+def test_native_string_input_rejection_is_complete_behavior_failure(tmp_path, tools):
+    complete_archive(tmp_path, tools)
+    path = tmp_path / "without_skill/ordinary-coding/turns.json"
+    evidence = native_rejected_search()
+    evidence["native_events"][1]["payload"]["input"] = "invalid arguments"
+    evidence["prompt"] = json.loads(path.read_text(encoding="utf-8"))[0]["prompt"]
+    write_json(path, [evidence])
+    seal_archive(tmp_path)
+    report = replay(tmp_path)
+    result = next(
+        item for item in report["results"] if item["arm"] == "without_skill" and item["case"] == "ordinary-coding"
+    )
+    assert result["status"] == "failed" and result["execution_complete"]
+    assert set(result["failures"]) == {"turn_1_native_input_rejected", "unnecessary_powercontext_call"}
+    assert report["qualified"]
+    assert all(item["status"] == "passed" for item in report["results"] if item is not result)
+
+
+def test_missing_streamed_input_is_not_an_explicit_null():
+    evidence = native_rejected_search()
+    payload = evidence["native_events"][1]["payload"]
+    payload.pop("input")
+    with pytest.raises(ValueError, match="missing_native_tool_input"):
+        scheduled(evidence["native_events"])
+    payload["input"] = None
+    assert scheduled(evidence["native_events"])[0]["input"] is None
+
+
+@pytest.mark.parametrize("input_source", ["streamed", "scheduled"])
+@pytest.mark.parametrize("mutation", ["missing_rejection", "started", "wire", "missing_rejection_with_wire"])
+def test_unverified_array_inputs_and_contradictory_wire_keep_replay_incomplete(tmp_path, tools, input_source, mutation):
+    complete_archive(tmp_path, tools)
+    path = tmp_path / "without_skill/ordinary-coding/turns.json"
+    evidence = native_rejected_array_search(input_source)
+    evidence["prompt"] = json.loads(path.read_text(encoding="utf-8"))[0]["prompt"]
+    if mutation in {"missing_rejection", "missing_rejection_with_wire"}:
+        evidence["native_events"].pop(3)
+    elif mutation == "started":
+        evidence["native_events"].insert(
+            3,
+            {"type": "tool.updated", "payload": {"kind": "started", "toolCallId": "rejected-search"}},
+        )
+    if mutation in {"wire", "missing_rejection_with_wire"}:
+        evidence["mcp_calls"] = [{"name": "search_memory", "arguments": [], "result": {}, "is_error": True}]
+    write_json(path, [evidence])
+    seal_archive(tmp_path)
+    report = replay(tmp_path)
+    result = next(
+        item for item in report["results"] if item["arm"] == "without_skill" and item["case"] == "ordinary-coding"
+    )
+    assert result["status"] == "incomplete"
+    assert not result["execution_complete"]
+    assert "turn_1_native_wire_mismatch" in result["failures"]
+    assert "unnecessary_powercontext_call" in result["failures"]
+    assert not report["qualified"]
+    assert all(item["status"] == "passed" for item in report["results"] if item is not result)
+
+
+@pytest.mark.parametrize("case,turn_index", [("explicit-save", 0), ("stale-approval", 1)])
+def test_nonobject_wire_cannot_enter_save_or_approval_business_rules(tmp_path, tools, case, turn_index):
+    complete_archive(tmp_path, tools)
+    path = tmp_path / "without_skill" / case / "turns.json"
+    evidence = json.loads(path.read_text(encoding="utf-8"))
+    evidence[turn_index]["native_events"][1]["payload"]["input"] = []
+    evidence[turn_index]["mcp_calls"][0]["arguments"] = []
+    write_json(path, evidence)
+    seal_archive(tmp_path)
+    report = replay(tmp_path)
+    result = next(item for item in report["results"] if item["arm"] == "without_skill" and item["case"] == case)
+    assert result["status"] == "incomplete"
+    assert not result["execution_complete"]
+    assert f"turn_{turn_index + 1}_native_wire_mismatch" in result["failures"]
+    assert not report["qualified"]
+    assert all(item["status"] == "passed" for item in report["results"] if item is not result)
+
+
 @pytest.mark.parametrize(
     "mutation",
     ["unmatched_id", "generic_error", "wrong_error_type", "started", "progress", "result", "conflicting_error", "wire"],
