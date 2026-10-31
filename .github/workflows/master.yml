@@ -254,7 +254,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.14"]
-        extras: ["builtin", "cli", "builtin,cli", "server,cli"]
+        extras: ["core", "builtin", "cli", "builtin,cli", "server,cli"]
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -278,7 +278,11 @@ jobs:
           uv build --wheel --out-dir "$RUNNER_TEMP/role-wheel"
           uv venv --python "$(command -v python)" "$RUNNER_TEMP/role-venv"
           wheel="$(find "$RUNNER_TEMP/role-wheel" -name '*.whl' -print -quit)"
-          uv pip install --python "$RUNNER_TEMP/role-venv/bin/python" "$wheel[$ROLE_EXTRAS]"
+          if [ "$ROLE_EXTRAS" = core ]; then
+            uv pip install --python "$RUNNER_TEMP/role-venv/bin/python" "$wheel"
+          else
+            uv pip install --python "$RUNNER_TEMP/role-venv/bin/python" "$wheel[$ROLE_EXTRAS]"
+          fi
 
       - name: Verify installed role behavior without checkout imports
         env:
@@ -1051,3 +1055,38 @@ jobs:
         env:
           POWERCONTEXT_TEST_BLOG_SITE: "1"
         run: uv run pytest tests/e2e/test_blog_site.py -q
+
+  helm:
+    name: Helm deployment contracts
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || fromJSON(needs.changes.outputs.suites || '{}').helm) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-python-env
+      - name: Install Helm
+        run: |
+          curl --fail --silent --show-error --location https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz -o /tmp/helm.tar.gz
+          curl --fail --silent --show-error --location https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz.sha256sum -o /tmp/helm.sha256
+          EXPECTED=$(cut -d ' ' -f 1 /tmp/helm.sha256)
+          echo "$EXPECTED  /tmp/helm.tar.gz" | sha256sum --check
+          tar -xzf /tmp/helm.tar.gz -C /tmp
+          sudo install /tmp/linux-amd64/helm /usr/local/bin/helm
+      - name: Lint chart
+        run: >-
+          helm lint deploy/helm/powercontext --strict
+          --set image.repository=example/powercontext
+          --set image.tag=ci
+          --set existingSecret=credentials
+      - name: Lint acceptance profile
+        run: >-
+          helm lint deploy/helm/powercontext --strict
+          --values deploy/helm/powercontext/values-acceptance.yaml
+          --set image.repository=example/powercontext
+          --set image.tag=ci
+          --set existingSecret=credentials
+      - name: Test deployment configuration and acceptance safeguards
+        run: uv run --locked pytest tests/test_helm_chart.py tests/test_helm_acceptance.py -q
