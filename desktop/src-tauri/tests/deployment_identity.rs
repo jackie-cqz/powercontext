@@ -40,6 +40,7 @@ struct State {
     pause: Option<String>,
     requests: Vec<String>,
     lose_write_response: bool,
+    reject_write: bool,
 }
 struct Fixture {
     manager: Arc<ConnectionManager>,
@@ -85,6 +86,7 @@ impl Fixture {
             pause: None,
             requests: vec![],
             lose_write_response: false,
+            reject_write: false,
         }));
         let started = Arc::new(Notify::new());
         let release = Arc::new(Notify::new());
@@ -152,6 +154,9 @@ impl Fixture {
                                 200,
                                 json!({"mode":"text","hits":[{"memory":record(),"score":1,"matched_by":["text"]}]}),
                             ),
+                            "/v1/memory/remember" if state.reject_write => {
+                                (403, json!({"error":{"code":"forbidden"}}))
+                            }
                             "/v1/memory/remember" => {
                                 (200, json!({"changed":true,"records":[record()]}))
                             }
@@ -671,6 +676,65 @@ async fn concurrent_read_disconnect_keeps_the_pending_write_until_its_unknown_re
             .operation_id,
         pending.operation_id
     );
+    assert_eq!(
+        fixture
+            .state
+            .lock()
+            .unwrap()
+            .requests
+            .iter()
+            .filter(|path| *path == "/v1/memory/remember")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn rejected_write_after_read_disconnection_retains_its_failed_original_receipt() {
+    let fixture = Fixture::new(true).await;
+    let generation = fixture.select().await;
+    {
+        let mut state = fixture.state.lock().unwrap();
+        state.pause = Some("/v1/memory/remember".into());
+        state.reject_write = true;
+    }
+    let manager = fixture.manager.clone();
+    let write = tokio::spawn(async move {
+        manager
+            .remember(generation, "rejected original input")
+            .await
+    });
+    fixture.entered().await;
+    fixture.state.lock().unwrap().discovery = (503, json!({"error":{"code":"runtime_not_ready"}}));
+    assert!(
+        fixture
+            .manager
+            .search_memory(generation, "query")
+            .await
+            .is_err()
+    );
+    fixture.assert_disconnected(generation);
+    let pending = fixture.manager.state().unwrap().last_write.unwrap();
+    assert_eq!(pending.status, WriteStatus::Pending);
+    fixture.release.notify_one();
+    let result = timeout(Duration::from_secs(5), write)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.record.status, WriteStatus::Failed);
+    assert_eq!(
+        result.record.error.as_ref().unwrap().code,
+        SafeError::Forbidden
+    );
+    assert_eq!(result.record.operation_id, pending.operation_id);
+    assert_eq!(result.record.context.server_id.as_deref(), Some("server-a"));
+    assert_eq!(result.record.context.scope_id, "scope-a");
+    assert!(result.result.is_none());
+    assert!(result.record.references.is_empty());
+    let retained = fixture.manager.state().unwrap().last_write.unwrap();
+    assert_eq!(retained.operation_id, pending.operation_id);
+    assert_eq!(retained.status, WriteStatus::Failed);
     assert_eq!(
         fixture
             .state

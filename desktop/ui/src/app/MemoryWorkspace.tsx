@@ -53,7 +53,7 @@ export type SubmittedDraft = {
   id: number;
   text: string;
   target: SubmittedTarget;
-  phase: "pending" | "unknown" | "unconfirmed";
+  phase: "pending" | "unknown" | "unconfirmed" | "failed";
 };
 export const textBytes = (value: string) =>
   new TextEncoder().encode(value).length;
@@ -90,13 +90,7 @@ export function SubmittedDraftRecovery({
     <section className="card stack" role="region" aria-label={t.recovery}>
       {confirmation}
       <h2>{t.recovery}</h2>
-      <p>
-        {draft.phase === "pending"
-          ? t.pending
-          : draft.phase === "unknown"
-            ? t.unknown
-            : t.unconfirmed}
-      </p>
+      <p>{t[draft.phase]}</p>
       <p>{t.recoveryHint}</p>
       <p>
         {t.original}: <WriteTarget context={draft.target} />

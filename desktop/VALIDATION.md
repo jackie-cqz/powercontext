@@ -65,6 +65,28 @@ the write finishes, individual discard, late unknown receipts after discard, and
 without restoring private results. TCP fixtures exercise the native Manager; jsdom tests mock IPC.
 These checks do not establish installed WebView or live external Server acceptance of the new paths.
 
+## Rejected submission recovery and Python CI checks
+
+On 2026-10-31, Windows 10 x64 checks reproduce a paused save returning 403 after a concurrent
+read disconnects the context. The native Manager retains the failed receipt and original target
+without replay; the application keeps the rejected text available for explicit copy/discard.
+English and Chinese App regressions verify copy, cancelled discard and explicit discard of rejected input.
+All 90 native suite cases and 148 frontend tests pass, together with TypeScript, lint, production build,
+Rust formatting, Clippy and IPC drift. Proxy isolation also reruns in a spawned process.
+All 14 deployment-identity cases pass with real loopback sockets and synthetic HTTP responses;
+App state-refresh tests use mocked IPC and do not qualify installed WebView behavior.
+
+Python 3.11.15 checks pass 38 cases across the affected MySQL admission/runner, worker logging
+and ZCode service-chain modules; 57 runner cases are skipped by their platform/backend guards.
+The admission fixture accepts the maintenance connection's missing-database keyword while
+retaining its read-only assertion. The real worker test waits for a completion observation
+before consuming captured descriptors. ZCode checks use Node 24.22.1 with a real HTTP Server
+and SQLite, including a response deliberately delayed past Stop's unchanged 800 ms request
+budget: the result remains unknown, another Stop does not replay the mutation, and independent
+reads verify committed memory, exact provenance and recall in a new session. A normal response
+also exercised the cursor-reached path. These local checks do not establish Linux/Python matrix
+success; consult the new CI run for those results.
+
 ## Native session observation checks
 
 Windows x64 checks for the native session collector use Rust 1.95.0, Node 24.14.1 and pnpm 11.13.1.

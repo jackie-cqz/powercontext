@@ -537,6 +537,8 @@ test.each([
   ["zh", "discard"],
   ["en", "success"],
   ["zh", "success"],
+  ["en", "failed"],
+  ["zh", "failed"],
 ] as const)(
   "%s retains an in-flight submission across read disconnection and honors %s",
   async (language, action) => {
@@ -604,7 +606,18 @@ test.each([
       );
       await answerConfirmation(user, true);
     }
-    const result = action === "success" ? makeSaved(1).outcome : unknown;
+    const result =
+      action === "success"
+        ? makeSaved(1).outcome
+        : action === "failed"
+          ? outcome("failed")
+          : unknown;
+    if (action === "failed")
+      result.record.error = {
+        code: "forbidden",
+        requestId: null,
+        dispatched: true,
+      };
     vi.mocked(desktopApi.state).mockResolvedValue({
       ...state,
       generation: 2,
@@ -614,7 +627,7 @@ test.each([
     await act(async () => {
       finish(result);
     });
-    if (action === "keep") {
+    if (action === "keep" || action === "failed") {
       const copy = screen.getByRole("textbox", {
         name: label,
       }) as HTMLTextAreaElement;
@@ -625,6 +638,26 @@ test.each([
           name: language === "en" ? "Submitted draft recovery" : "提交草稿恢复",
         }).textContent,
       ).toContain("server-a");
+      if (action === "failed") {
+        const discard = screen.getByRole("button", {
+          name: language === "en" ? "Discard submitted text" : "丢弃提交文本",
+        });
+        await user.click(discard);
+        await answerConfirmation(user, false);
+        expect(copy.value).toBe("in-flight original input");
+        const clipboard = vi
+          .spyOn(navigator.clipboard, "writeText")
+          .mockResolvedValue();
+        await user.click(
+          screen.getByRole("button", {
+            name: language === "en" ? "Copy text" : "复制正文",
+          }),
+        );
+        expect(clipboard).toHaveBeenCalledWith("in-flight original input");
+        await user.click(discard);
+        await answerConfirmation(user, true);
+        expect(screen.queryByRole("textbox", { name: label })).toBeNull();
+      }
     } else {
       expect(screen.queryByRole("textbox", { name: label })).toBeNull();
     }

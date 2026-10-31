@@ -79,18 +79,12 @@ export function App() {
       setSubmittedDrafts((current) =>
         current.flatMap((draft) => {
           if (draft.id !== id) return [draft];
-          if (record?.status === "succeeded" || record?.status === "failed")
-            return [];
+          if (record?.status === "succeeded") return [];
           return [
             {
               ...draft,
               target: record?.context ?? draft.target,
-              phase:
-                record?.status === "unknown"
-                  ? "unknown"
-                  : record
-                    ? "pending"
-                    : "unconfirmed",
+              phase: record?.status ?? "unconfirmed",
             },
           ];
         }),
